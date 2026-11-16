@@ -28,15 +28,32 @@ android {
         }
     }
     compileOptions {
-        sourceCompatibility = JavaVersion.VERSION_11
-        targetCompatibility = JavaVersion.VERSION_11
+        isCoreLibraryDesugaringEnabled = true
+        sourceCompatibility = JavaVersion.VERSION_17
+        targetCompatibility = JavaVersion.VERSION_17
     }
     buildFeatures {
         compose = true
     }
 }
 
+tasks.withType<org.jetbrains.kotlin.gradle.tasks.KotlinCompile>().configureEach {
+    compilerOptions {
+        freeCompilerArgs.add("-Xskip-metadata-version-check")
+    }
+}
+
 dependencies {
+    coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.1.5")
+
+    val readiumVersion = "3.4.0"
+    implementation("org.readium.kotlin-toolkit:readium-shared:$readiumVersion")
+    implementation("org.readium.kotlin-toolkit:readium-streamer:$readiumVersion")
+    implementation("org.readium.kotlin-toolkit:readium-navigator:$readiumVersion")
+    implementation("org.readium.kotlin-toolkit:readium-adapter-pdfium:$readiumVersion")
+
+    implementation("androidx.fragment:fragment-ktx:1.8.5")
+
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)
     implementation(libs.androidx.compose.material3)
