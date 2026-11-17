@@ -35,6 +35,7 @@ class MainActivity : FragmentActivity() {
     }
 
     private fun handleIntent(intent: Intent?) {
+        android.util.Log.d("MainActivity", "handleIntent: action=${intent?.action}, data=${intent?.data}")
         if (intent?.action == Intent.ACTION_VIEW) {
             intent.data?.let { uri ->
                 incomingUri = uri
