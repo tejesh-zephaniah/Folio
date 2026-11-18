@@ -5,52 +5,56 @@ import io.github.tejesh_zephaniah.folio.bookshelf.BookshelfUiState
 import io.github.tejesh_zephaniah.folio.bookshelf.SortOrder
 import io.github.tejesh_zephaniah.folio.core.storage.AppThemeMode
 import io.github.tejesh_zephaniah.folio.core.storage.ReaderThemeMode
-import io.github.tejesh_zephaniah.folio.data.MockBookCatalog
+import io.github.tejesh_zephaniah.folio.core.designsystem.components.CoverStyle
+import io.github.tejesh_zephaniah.folio.core.designsystem.theme.BookPalettes
+import io.github.tejesh_zephaniah.folio.data.model.Book
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
-import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
+
+private val gatsby = Book(
+    id = "gatsby",
+    title = "The Great Gatsby",
+    author = "F. Scott Fitzgerald",
+    genre = "Fiction",
+    synopsis = "",
+    totalPages = 100,
+    currentPage = 25,
+    palette = BookPalettes.WildLight,
+    coverStyle = CoverStyle.VintageClassic,
+    chapters = emptyList()
+)
+
+internal val testLibrary = listOf(
+    gatsby,
+    gatsby.copy(id = "moby", title = "Moby-Dick", author = "Herman Melville", currentPage = 0),
+    gatsby.copy(id = "emma", title = "Emma", author = "Jane Austen", isFinished = true)
+)
 
 class FolioUnitTest {
 
     @Test
-    fun mockCatalog_hasBooksWithValidData() {
-        val books = MockBookCatalog.books
-        assertTrue("Catalog must not be empty", books.isNotEmpty())
-
-        books.forEach { book ->
-            assertTrue("Book ID must not be blank", book.id.isNotBlank())
-            assertTrue("Book title must not be blank", book.title.isNotBlank())
-            assertTrue("Book author must not be blank", book.author.isNotBlank())
-            assertTrue("Book must have at least one chapter", book.chapters.isNotEmpty())
-            assertTrue("Total pages must be positive", book.totalPages > 0)
-            assertTrue("Progress percentage must be between 0 and 100", book.progressPercentage in 0..100)
-        }
-    }
-
-    @Test
-    fun mockCatalog_getBookById_returnsCorrectBook() {
-        val book = MockBookCatalog.getBookById("gatsby")
-        assertNotNull("Should find book with id 'gatsby'", book)
-        assertEquals("The Great Gatsby", book?.title)
+    fun emptyLibrary_hasNoBooksToDisplay() {
+        assertTrue(BookshelfUiState().filteredBooks.isEmpty())
     }
 
     @Test
     fun bookshelfUiState_filter_all_returnsAllBooks() {
         val state = BookshelfUiState(
-            books = MockBookCatalog.books,
+            books = testLibrary,
             selectedFilter = BookshelfFilter.ALL
         )
-        assertEquals(MockBookCatalog.books.size, state.filteredBooks.size)
+        assertEquals(testLibrary.size, state.filteredBooks.size)
     }
 
     @Test
     fun bookshelfUiState_filter_reading_returnsOnlyStartedUnfinishedBooks() {
         val state = BookshelfUiState(
-            books = MockBookCatalog.books,
+            books = testLibrary,
             selectedFilter = BookshelfFilter.READING
         )
+        assertEquals(listOf("gatsby"), state.filteredBooks.map { it.id })
         state.filteredBooks.forEach { book ->
             assertTrue("Book must be currently reading", book.isCurrentlyReading)
             assertFalse("Book must not be finished", book.isFinished)
@@ -60,7 +64,7 @@ class FolioUnitTest {
     @Test
     fun bookshelfUiState_searchQuery_filtersByTitleAndAuthor() {
         val state = BookshelfUiState(
-            books = MockBookCatalog.books,
+            books = testLibrary,
             searchQuery = "Fitzgerald"
         )
         assertEquals(1, state.filteredBooks.size)
@@ -70,7 +74,7 @@ class FolioUnitTest {
     @Test
     fun bookshelfUiState_sortByTitle_ordersAlphabetically() {
         val state = BookshelfUiState(
-            books = MockBookCatalog.books,
+            books = testLibrary,
             sortOrder = SortOrder.TITLE
         )
         val titles = state.filteredBooks.map { it.title.lowercase() }
@@ -80,7 +84,7 @@ class FolioUnitTest {
     @Test
     fun bookshelfUiState_sortByAuthor_ordersAlphabetically() {
         val state = BookshelfUiState(
-            books = MockBookCatalog.books,
+            books = testLibrary,
             sortOrder = SortOrder.AUTHOR
         )
         val authors = state.filteredBooks.map { it.author.lowercase() }
@@ -89,14 +93,14 @@ class FolioUnitTest {
 
     @Test
     fun bookProgressPercentage_calculatesCorrectly() {
-        val book = MockBookCatalog.getBookById("gatsby")!!
+        val book = testLibrary.single { it.id == "gatsby" }
         val expected = ((book.currentPage.toFloat() / book.totalPages) * 100).toInt()
         assertEquals(expected, book.progressPercentage)
     }
 
     @Test
     fun themeModes_haveValidEnums() {
-        assertEquals(3, AppThemeMode.entries.size)
+        assertEquals(6, AppThemeMode.entries.size)
         assertEquals(4, ReaderThemeMode.entries.size)
     }
 }
