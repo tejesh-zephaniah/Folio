@@ -239,7 +239,9 @@ class FolioDatabaseHelper(context: Context) : SQLiteOpenHelper(context, DATABASE
             put(COL_BOOK_ADDED_AT, book.addedAt)
             put(COL_BOOK_LAST_READ_AT, book.lastReadAt)
         }
-        db.insertWithOnConflict(TABLE_BOOKS, null, values, SQLiteDatabase.CONFLICT_REPLACE)
+        check(db.insertWithOnConflict(TABLE_BOOKS, null, values, SQLiteDatabase.CONFLICT_REPLACE) != -1L) {
+            "Could not save the imported book"
+        }
     }
 
     fun getBookById(id: String): StoredBook? {

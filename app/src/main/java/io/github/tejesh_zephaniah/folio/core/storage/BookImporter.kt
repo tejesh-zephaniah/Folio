@@ -17,6 +17,7 @@ import org.readium.r2.shared.util.use
 import java.io.File
 import java.io.FileInputStream
 import java.io.FileOutputStream
+import java.io.IOException
 import java.util.UUID
 
 object BookImporter {
@@ -27,7 +28,13 @@ object BookImporter {
      * parses its metadata using Readium Streamer, extracts embedded covers, saves it to SQLite,
      * and returns the Book.
      */
-    suspend fun importBook(context: Context, uri: Uri): Result<Book> = withContext(Dispatchers.IO) {
+    suspend fun importBook(
+        context: Context,
+        uri: Uri,
+        requireReadable: Boolean = false
+    ): Result<Book> = withContext(Dispatchers.IO) {
+        var stagedBook: File? = null
+        var committed = false
         try {
             val contentResolver = context.contentResolver
             var fileName = "imported_book"
@@ -64,6 +71,7 @@ object BookImporter {
             val booksDir = File(context.filesDir, "books").apply { if (!exists()) mkdirs() }
             val bookId = UUID.randomUUID().toString()
             val targetFile = File(booksDir, "$bookId.$extension")
+            stagedBook = targetFile
 
             // Copy file content to app-private storage
             val inputStream = if (isContentScheme) {
@@ -123,8 +131,10 @@ object BookImporter {
             }
 
             // 2. Readium metadata & EPUB embedded cover extraction
+            var readable = false
             try {
                 ReadiumManager.openPublication(context, targetFile)?.use { publication ->
+                    readable = true
                     val pubTitle = publication.metadata.title
                     if (!pubTitle.isNullOrBlank()) {
                         title = pubTitle
@@ -172,6 +182,9 @@ object BookImporter {
             } catch (e: Exception) {
                 Log.w(TAG, "Could not extract publication metadata", e)
             }
+            if (requireReadable && !readable) {
+                return@withContext Result.failure(IOException("The downloaded book could not be opened"))
+            }
 
             val storedBook = StoredBook(
                 id = bookId,
@@ -190,12 +203,20 @@ object BookImporter {
             )
 
             BookRepository.getInstance(context).insertBook(storedBook)
+            committed = true
             Result.success(storedBook.toBook())
         } catch (e: CancellationException) {
             throw e
         } catch (e: Exception) {
             Log.e(TAG, "Failed to import book: ${e.message}", e)
             Result.failure(e)
+        } finally {
+            if (!committed) {
+                stagedBook?.let { staged ->
+                    staged.delete()
+                    File(context.filesDir, "covers/${staged.nameWithoutExtension}.png").delete()
+                }
+            }
         }
     }
 }

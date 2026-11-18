@@ -124,7 +124,7 @@ fun SearchScreen(
                     ) {
                         if (searchQuery.isEmpty()) {
                             Text(
-                                text = "Search by title, author, or genre...",
+                                text = "Search your library…",
                                 color = FolioTheme.extendedColors.textSecondary,
                                 fontSize = 15.sp
                             )

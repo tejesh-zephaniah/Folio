@@ -6,6 +6,7 @@ import android.graphics.RenderEffect
 import android.graphics.RuntimeShader
 import android.graphics.Shader
 import android.os.Build
+import android.util.LruCache
 import androidx.annotation.RequiresApi
 import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
@@ -51,6 +52,17 @@ internal fun rememberGlassSource(): GlassSource {
 }
 
 internal val LocalSearchGlassSource = staticCompositionLocalOf<GlassSource?> { null }
+
+private data class GlassEffectKey(
+    val size: IntSize,
+    val density: Float,
+    val blurRadius: Float,
+    val dark: Boolean,
+    val lens: Boolean,
+    val cornerRadius: Float
+)
+
+private val glassEffects = LruCache<GlassEffectKey, androidx.compose.ui.graphics.RenderEffect>(24)
 
 internal fun Modifier.captureGlassSource(source: GlassSource): Modifier {
     if (Build.VERSION.SDK_INT < 31) return this
@@ -112,15 +124,19 @@ internal fun GlassBackdrop(
         val downsample = 0.5f
         val cropSize = IntSize(ceil(size.width * downsample).toInt(), ceil(size.height * downsample).toInt())
         if (source != null && Build.VERSION.SDK_INT >= 31 && cropSize.width > 0 && cropSize.height > 0) {
-            val blurRadius = (if (isLens) 9f else 12f) * density * downsample
-            val effect = if (Build.VERSION.SDK_INT >= 33) {
-                val radius = if (cornerRadius == Dp.Unspecified) cropSize.height * 0.5f
-                    else cornerRadius.toPx() * downsample
-                glassOptics(cropSize, density * downsample, blurRadius, dark, isLens, radius)
-            } else {
-                contrastBlur(blurRadius, dark)
+            val sampleDensity = density * downsample
+            val blurRadius = (if (isLens) 9f else 12f) * sampleDensity
+            val radius = if (cornerRadius == Dp.Unspecified) cropSize.height * 0.5f
+                else cornerRadius.toPx() * downsample
+            val key = GlassEffectKey(cropSize, sampleDensity, blurRadius, dark, isLens, radius)
+            crop.renderEffect = glassEffects.get(key) ?: run {
+                val effect = if (Build.VERSION.SDK_INT >= 33) {
+                    glassOptics(cropSize, sampleDensity, blurRadius, dark, isLens, radius)
+                } else {
+                    contrastBlur(blurRadius, dark)
+                }
+                effect.asComposeRenderEffect().also { glassEffects.put(key, it) }
             }
-            crop.renderEffect = effect.asComposeRenderEffect()
             crop.clip = true
         }
         onDrawBehind {

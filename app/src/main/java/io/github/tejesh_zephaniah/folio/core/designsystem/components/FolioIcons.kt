@@ -85,6 +85,22 @@ fun FolioLibraryIcon(
 }
 
 @Composable
+fun FolioExploreIcon(tint: Color, modifier: Modifier = Modifier) {
+    Canvas(modifier) {
+        val radius = size.minDimension * 0.41f
+        drawCircle(tint, radius, center, style = Stroke(1.8.dp.toPx()))
+        val needle = Path().apply {
+            moveTo(center.x + radius * 0.57f, center.y - radius * 0.57f)
+            lineTo(center.x + radius * 0.20f, center.y + radius * 0.20f)
+            lineTo(center.x - radius * 0.57f, center.y + radius * 0.57f)
+            lineTo(center.x - radius * 0.20f, center.y - radius * 0.20f)
+            close()
+        }
+        drawPath(needle, tint)
+    }
+}
+
+@Composable
 fun FolioSearchIcon(
     tint: Color,
     modifier: Modifier = Modifier

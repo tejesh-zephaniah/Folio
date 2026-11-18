@@ -4,6 +4,7 @@ import android.graphics.Bitmap
 import android.graphics.Canvas
 import android.graphics.Paint
 import android.graphics.Typeface
+import android.graphics.text.LineBreaker
 import android.text.Layout
 import android.text.Spannable
 import android.text.StaticLayout
@@ -152,7 +153,7 @@ class MockBookPageSurfaceProvider private constructor(
                 .setAlignment(Layout.Alignment.ALIGN_NORMAL)
                 .setLineSpacing(11.5f * density, 1f)
                 .setIncludePad(false)
-                .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
+                .setBreakStrategy(LineBreaker.BREAK_STRATEGY_HIGH_QUALITY)
                 .build()
 
             val pages = mutableListOf<PageSlice>()

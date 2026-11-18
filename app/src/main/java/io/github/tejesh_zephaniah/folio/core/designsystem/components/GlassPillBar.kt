@@ -48,9 +48,11 @@ import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.platform.LocalWindowInfo
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
@@ -67,6 +69,7 @@ import kotlinx.coroutines.launch
 enum class FolioTab(val label: String) {
     Home("Home"),
     Library("Library"),
+    Explore("Explore"),
     Search("Search")
 }
 
@@ -77,13 +80,16 @@ internal fun GlassPillBar(
     backdrop: GlassSource,
     modifier: Modifier = Modifier
 ) {
-    val tabWidth = 84.dp
     val tabHeight = 48.dp
     val spacing = 4.dp
     val inset = 6.dp
+    val tabs = FolioTab.entries
+    val density = LocalDensity.current
+    val windowWidth = with(density) { LocalWindowInfo.current.containerSize.width.toDp() }
+    val tabWidth = ((windowWidth - 24.dp - inset * 2 - spacing * tabs.lastIndex) / tabs.size)
+        .coerceIn(1.dp, 76.dp)
     val tabStep = tabWidth + spacing
     val firstCenter = inset + tabWidth / 2
-    val tabs = FolioTab.entries
 
     var held by remember { mutableStateOf(false) }
     var dragIndex by remember { mutableStateOf<Float?>(null) }
@@ -117,7 +123,6 @@ internal fun GlassPillBar(
     val dark = colors.background.luminance() < 0.45f
     val selectedInk = lerp(colors.primary, colors.onSurface, if (dark) 0.26f else 0.62f)
     val contrast = if (dark) Color.Black else Color.White
-    val density = LocalDensity.current
     val labelShadow = with(density) {
         Shadow(contrast.copy(alpha = 0.90f), Offset(0f, 0.35.dp.toPx()), 1.1.dp.toPx())
     }
@@ -133,7 +138,7 @@ internal fun GlassPillBar(
         modifier = modifier
             .onGloballyPositioned { barCoordinates = it }
             .selectableGroup()
-            .pointerInput(layoutDirection) {
+            .pointerInput(layoutDirection, tabStep) {
                 fun indexAt(x: Float): Float {
                     val distance = if (layoutDirection == LayoutDirection.Ltr) x else size.width - x
                     return (distance - firstCenter.toPx()) / tabStep.toPx()
@@ -276,6 +281,8 @@ internal fun GlassPillBar(
                     Text(
                         text = tab.label,
                         color = ink,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
                         style = TextStyle(
                             fontSize = 12.sp,
                             fontWeight = if (highlighted) FontWeight.Bold else FontWeight.SemiBold,
@@ -293,6 +300,7 @@ private fun FolioTab.Icon(tint: Color, modifier: Modifier) {
     when (this) {
         FolioTab.Home -> FolioHomeIcon(tint, modifier)
         FolioTab.Library -> FolioLibraryIcon(tint, modifier)
+        FolioTab.Explore -> FolioExploreIcon(tint, modifier)
         FolioTab.Search -> FolioSearchIcon(tint, modifier)
     }
 }

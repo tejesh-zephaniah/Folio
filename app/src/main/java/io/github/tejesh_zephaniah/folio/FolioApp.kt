@@ -1,6 +1,7 @@
 package io.github.tejesh_zephaniah.folio
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.fadeIn
@@ -12,17 +13,31 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
+import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.lifecycle.DefaultLifecycleObserver
+import androidx.lifecycle.LifecycleOwner
 import io.github.tejesh_zephaniah.folio.bookshelf.BookActions
 import io.github.tejesh_zephaniah.folio.bookshelf.BookshelfScreen
 import io.github.tejesh_zephaniah.folio.bookshelf.rememberBookshelfState
@@ -34,11 +49,16 @@ import io.github.tejesh_zephaniah.folio.core.designsystem.effects.rememberGlassS
 import io.github.tejesh_zephaniah.folio.core.designsystem.theme.FolioTheme
 import io.github.tejesh_zephaniah.folio.core.designsystem.theme.browsingBackdrop
 import io.github.tejesh_zephaniah.folio.core.storage.AppThemeMode
+import io.github.tejesh_zephaniah.folio.core.storage.BookImporter
 import io.github.tejesh_zephaniah.folio.core.storage.PreferencesManager
 import io.github.tejesh_zephaniah.folio.data.model.Book
+import io.github.tejesh_zephaniah.folio.explore.ExploreMessage
+import io.github.tejesh_zephaniah.folio.explore.ExploreScreen
+import io.github.tejesh_zephaniah.folio.explore.ExploreSession
 import io.github.tejesh_zephaniah.folio.home.HomeScreen
 import io.github.tejesh_zephaniah.folio.reader.ReaderScreen
 import io.github.tejesh_zephaniah.folio.search.SearchScreen
+import kotlinx.coroutines.delay
 
 sealed interface FolioScreen {
     data class Browsing(val tab: FolioTab = FolioTab.Library) : FolioScreen
@@ -70,6 +90,25 @@ fun FolioApp(
     var currentScreen by remember { mutableStateOf<FolioScreen>(FolioScreen.Browsing(FolioTab.Library)) }
 
     val bookshelfState = rememberBookshelfState(context)
+    val exploreScope = rememberCoroutineScope()
+    val exploreSession = remember(context, exploreScope) { ExploreSession(context, exploreScope) }
+    val exploreNotice = exploreSession.notice
+    LaunchedEffect(exploreNotice) {
+        val notice = exploreNotice ?: return@LaunchedEffect
+        delay(3_800)
+        exploreSession.dismissNotice(notice)
+    }
+    DisposableEffect(exploreSession) {
+        val lifecycle = (context as? LifecycleOwner)?.lifecycle
+        val observer = object : DefaultLifecycleObserver {
+            override fun onStop(owner: LifecycleOwner) = exploreSession.flushSiteData()
+        }
+        lifecycle?.addObserver(observer)
+        onDispose {
+            lifecycle?.removeObserver(observer)
+            exploreSession.close()
+        }
+    }
 
     fun openBook(book: Book) {
         val latestBook = bookshelfState.uiState.books.firstOrNull { it.id == book.id } ?: book
@@ -79,15 +118,11 @@ fun FolioApp(
     }
 
     // Handle intent-based incoming books (Open With)
-    androidx.compose.runtime.LaunchedEffect(incomingUri) {
+    LaunchedEffect(incomingUri) {
         if (incomingUri != null) {
-            android.util.Log.d("FolioApp", "Processing incomingUri: $incomingUri")
-            val result = io.github.tejesh_zephaniah.folio.core.storage.BookImporter.importBook(context, incomingUri)
+            val result = BookImporter.importBook(context, incomingUri)
             onIncomingUriConsumed()
-            result.onSuccess { importedBook ->
-                android.util.Log.d("FolioApp", "Import success: ${importedBook.title}")
-                openBook(importedBook)
-            }.onFailure { err ->
+            result.onSuccess(::openBook).onFailure { err ->
                 android.util.Log.e("FolioApp", "Import failure: ${err.message}", err)
             }
         }
@@ -127,12 +162,14 @@ fun FolioApp(
                 when (screen) {
                     is FolioScreen.Browsing -> {
                         Box(modifier = Modifier.fillMaxSize()) {
+                            var navigationHeight by remember { mutableIntStateOf(0) }
                             val backdrop = rememberGlassSource()
                             val themeBackdrop = rememberGlassSource()
+                            val isExploring = currentTab == FolioTab.Explore
                             Box(
-                                Modifier
-                                    .fillMaxSize()
-                                    .captureGlassSource(backdrop)
+                                Modifier.fillMaxSize().then(
+                                    if (isExploring) Modifier else Modifier.captureGlassSource(backdrop)
+                                )
                             ) {
                                 Box(
                                     Modifier.matchParentSize()
@@ -140,40 +177,51 @@ fun FolioApp(
                                         .browsingBackdrop(appThemeMode, MaterialTheme.colorScheme.background)
                                 )
                                 CompositionLocalProvider(LocalSearchGlassSource provides themeBackdrop) {
-                                    when (currentTab) {
-                                        FolioTab.Home -> {
-                                            val continueReadingId = PreferencesManager.getLastOpenedBookId(context)
-                                            val continueBook = resolveLastSessionBook(continueReadingId, bookshelfState.uiState.books)
-                                            val recentBooks = bookshelfState.uiState.recentlyReadIds
-                                                .mapNotNull { id -> bookshelfState.uiState.books.firstOrNull { it.id == id } }
-                                                .filter { it.id != continueBook?.id }
+                                    SlidingTab(currentTab) {
+                                        when (currentTab) {
+                                            FolioTab.Home -> {
+                                                val continueReadingId = PreferencesManager.getLastOpenedBookId(context)
+                                                val continueBook = resolveLastSessionBook(continueReadingId, bookshelfState.uiState.books)
+                                                val recentBooks = bookshelfState.uiState.recentlyReadIds
+                                                    .mapNotNull { id -> bookshelfState.uiState.books.firstOrNull { it.id == id } }
+                                                    .filter { it.id != continueBook?.id }
 
-                                            HomeScreen(
-                                                continueReadingBook = continueBook,
-                                                recentlyReadBooks = recentBooks,
-                                                onBookOpen = { openBook(it) },
-                                                onBookOptions = bookshelfState::onOpenBookDetails,
-                                                onNavigateToLibrary = { currentTab = FolioTab.Library }
-                                            )
-                                        }
+                                                HomeScreen(
+                                                    continueReadingBook = continueBook,
+                                                    recentlyReadBooks = recentBooks,
+                                                    onBookOpen = { openBook(it) },
+                                                    onBookOptions = bookshelfState::onOpenBookDetails,
+                                                    onNavigateToLibrary = { currentTab = FolioTab.Library }
+                                                )
+                                            }
 
-                                        FolioTab.Library -> {
-                                            BookshelfScreen(
-                                                state = bookshelfState,
-                                                appThemeMode = appThemeMode,
-                                                onAppThemeChange = { newMode ->
-                                                    appThemeMode = newMode
-                                                    PreferencesManager.setAppThemeMode(context, newMode)
-                                                },
-                                                onBookOpen = { openBook(it) }
-                                            )
-                                        }
+                                            FolioTab.Library -> {
+                                                BookshelfScreen(
+                                                    state = bookshelfState,
+                                                    appThemeMode = appThemeMode,
+                                                    onAppThemeChange = { newMode ->
+                                                        appThemeMode = newMode
+                                                        PreferencesManager.setAppThemeMode(context, newMode)
+                                                    },
+                                                    onBookOpen = { openBook(it) }
+                                                )
+                                            }
 
-                                        FolioTab.Search -> {
-                                            SearchScreen(
-                                                onBookOpen = { openBook(it) },
-                                                onBookOptions = bookshelfState::onOpenBookDetails
-                                            )
+                                            FolioTab.Search -> {
+                                                SearchScreen(
+                                                    onBookOpen = { openBook(it) },
+                                                    onBookOptions = bookshelfState::onOpenBookDetails
+                                                )
+                                            }
+
+                                            FolioTab.Explore -> {
+                                                val bottom = with(LocalDensity.current) { navigationHeight.toDp() }
+                                                ExploreScreen(
+                                                    session = exploreSession,
+                                                    onLeave = { currentTab = FolioTab.Library },
+                                                    modifier = Modifier.statusBarsPadding().padding(bottom = bottom)
+                                                )
+                                            }
                                         }
                                     }
                                 }
@@ -183,13 +231,14 @@ fun FolioApp(
                             Box(
                                 modifier = Modifier
                                     .align(Alignment.BottomCenter)
+                                    .onSizeChanged { navigationHeight = it.height }
                                     .navigationBarsPadding()
-                                    .padding(bottom = 16.dp)
+                                    .padding(bottom = 7.dp)
                             ) {
                                 GlassPillBar(
                                     selectedTab = currentTab,
                                     onTabSelected = { currentTab = it },
-                                    backdrop = backdrop
+                                    backdrop = if (isExploring) themeBackdrop else backdrop
                                 )
                             }
                             BookActions(bookshelfState)
@@ -207,6 +256,34 @@ fun FolioApp(
                     }
                 }
             }
+            exploreNotice?.let {
+                ExploreMessage(
+                    notice = it,
+                    modifier = Modifier.align(Alignment.TopCenter).statusBarsPadding()
+                        .padding(horizontal = 20.dp, vertical = 10.dp)
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SlidingTab(tab: FolioTab, content: @Composable () -> Unit) {
+    var previousTab by remember { mutableStateOf(tab) }
+    val slide = remember(tab) { Animatable(tab.ordinal.compareTo(previousTab.ordinal).toFloat()) }
+    val layoutSign = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+    LaunchedEffect(slide) {
+        previousTab = tab
+        if (slide.value != 0f) slide.animateTo(0f, tween(165, easing = FastOutSlowInEasing))
+    }
+    // Move a single display layer. A full-screen crossfade needs two rendered tabs at once.
+    Box(Modifier.fillMaxSize().clipToBounds()) {
+        Box(
+            Modifier.fillMaxSize().graphicsLayer {
+                translationX = 22.dp.toPx() * layoutSign * slide.value
+            }
+        ) {
+            key(tab) { content() }
         }
     }
 }
