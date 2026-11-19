@@ -31,3 +31,7 @@ To build the debug APK and run the unit tests from PowerShell, run
 ```
 
 On macOS or Linux, run `./gradlew :app:assembleDebug :app:testDebugUnitTest`. The debug APK is written to `app/build/outputs/apk/debug/app-debug.apk`.
+
+## License
+
+Folio’s source code is licensed under the [MIT License](LICENSE).
