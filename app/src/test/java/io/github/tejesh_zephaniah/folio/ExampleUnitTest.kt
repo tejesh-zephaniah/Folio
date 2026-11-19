@@ -1,6 +1,7 @@
 package io.github.tejesh_zephaniah.folio
 
 import io.github.tejesh_zephaniah.folio.bookshelf.BookshelfFilter
+import io.github.tejesh_zephaniah.folio.bookshelf.BookshelfState
 import io.github.tejesh_zephaniah.folio.bookshelf.BookshelfUiState
 import io.github.tejesh_zephaniah.folio.bookshelf.SortOrder
 import io.github.tejesh_zephaniah.folio.core.storage.AppThemeMode
@@ -89,6 +90,27 @@ class FolioUnitTest {
         )
         val authors = state.filteredBooks.map { it.author.lowercase() }
         assertEquals(authors.sorted(), authors)
+    }
+
+    @Test
+    fun recentlyAdded_usesImportTimeEvenWhenReadingOrderDiffers() {
+        val olderRead = gatsby.copy(addedAt = 10)
+        val newUnread = testLibrary[1].copy(addedAt = 20)
+        val state = BookshelfUiState(books = listOf(olderRead, newUnread), recentlyReadIds = listOf(olderRead.id))
+        assertEquals(listOf(newUnread.id, olderRead.id), state.filteredBooks.map { it.id })
+        assertEquals(olderRead.id, state.copy(sortOrder = SortOrder.RECENTLY_READ).filteredBooks.first().id)
+    }
+
+    @Test
+    fun exploreImport_revealsTheNewBookThroughFiltersAndDoesNotDuplicateIt() {
+        val imported = testLibrary[1].copy(addedAt = 20)
+        val state = BookshelfState(initialBooks = listOf(gatsby, imported))
+        state.onSortOrderSelected(SortOrder.AUTHOR)
+        state.onFilterSelected(BookshelfFilter.READING)
+        state.onSearchQueryChanged("Fitzgerald")
+        state.showExploreImport(imported)
+        assertEquals(listOf(imported.id, gatsby.id), state.uiState.filteredBooks.map { it.id })
+        assertEquals(imported.id, state.latestExploreImport)
     }
 
     @Test

@@ -15,8 +15,10 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
+import androidx.compose.foundation.lazy.grid.rememberLazyGridState
 import androidx.compose.foundation.lazy.grid.items
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -30,11 +32,10 @@ import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
-import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -49,9 +50,7 @@ import io.github.tejesh_zephaniah.folio.bookshelf.components.SearchFilterBar
 import io.github.tejesh_zephaniah.folio.core.designsystem.components.FolioAddIcon
 import io.github.tejesh_zephaniah.folio.core.designsystem.theme.FolioTheme
 import io.github.tejesh_zephaniah.folio.core.storage.AppThemeMode
-import io.github.tejesh_zephaniah.folio.core.storage.BookImporter
 import io.github.tejesh_zephaniah.folio.data.model.Book
-import kotlinx.coroutines.launch
 
 @Composable
 fun BookshelfScreen(
@@ -59,28 +58,27 @@ fun BookshelfScreen(
     appThemeMode: AppThemeMode,
     onAppThemeChange: (AppThemeMode) -> Unit,
     onBookOpen: (Book) -> Unit,
+    onImportBooks: (List<Uri>) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    val context = LocalContext.current
-    val scope = rememberCoroutineScope()
     val uiState = state.uiState
+    val displayedBooks = uiState.filteredBooks
+    val grid = rememberLazyGridState()
+    val list = rememberLazyListState()
+    val latestImport = state.latestExploreImport
+    LaunchedEffect(latestImport, displayedBooks.firstOrNull()?.id, uiState.viewMode) {
+        if (latestImport != null && displayedBooks.firstOrNull()?.id == latestImport) {
+            if (uiState.viewMode == BookshelfViewMode.GRID_2_COL) grid.scrollToItem(0)
+            else list.scrollToItem(0)
+            state.acknowledgeExploreImport(latestImport)
+        }
+    }
 
     // Storage Access Framework Document Picker Launcher
     val documentPickerLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenMultipleDocuments()
     ) { uris: List<Uri> ->
-        if (uris.isNotEmpty()) {
-            scope.launch {
-                var firstImportedBook: Book? = null
-                for (uri in uris) {
-                    val result = BookImporter.importBook(context, uri)
-                    result.onSuccess { book ->
-                        if (firstImportedBook == null) firstImportedBook = book
-                    }
-                }
-                firstImportedBook?.let { onBookOpen(it) }
-            }
-        }
+        if (uris.isNotEmpty()) onImportBooks(uris)
     }
 
     fun launchBookPicker() {
@@ -121,8 +119,6 @@ fun BookshelfScreen(
             )
 
             // Books Content Grid or List
-            val displayedBooks = uiState.filteredBooks
-
             if (displayedBooks.isEmpty()) {
                 // Thoughtful, Editorial Empty State
                 Box(
@@ -179,6 +175,7 @@ fun BookshelfScreen(
                 when (uiState.viewMode) {
                     BookshelfViewMode.GRID_2_COL -> {
                         LazyVerticalGrid(
+                            state = grid,
                             columns = GridCells.Fixed(2),
                             contentPadding = PaddingValues(
                                 start = 18.dp,
@@ -205,6 +202,7 @@ fun BookshelfScreen(
 
                     BookshelfViewMode.COMPACT_LIST -> {
                         LazyColumn(
+                            state = list,
                             contentPadding = PaddingValues(
                                 start = 16.dp,
                                 end = 16.dp,

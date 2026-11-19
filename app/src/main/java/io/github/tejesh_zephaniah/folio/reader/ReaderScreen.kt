@@ -323,18 +323,14 @@ fun ReaderScreen(
                     visible = isThemeMenuVisible && areControlsVisible,
                     enter = androidx.compose.animation.scaleIn(
                         transformOrigin = TransformOrigin(0.88f, 0.95f),
-                        animationSpec = androidx.compose.animation.core.spring(
-                            dampingRatio = 0.76f,
-                            stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
-                        )
-                    ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(180)),
+                        initialScale = 0.96f,
+                        animationSpec = androidx.compose.animation.core.tween(110)
+                    ) + fadeIn(animationSpec = androidx.compose.animation.core.tween(95)),
                     exit = androidx.compose.animation.scaleOut(
                         transformOrigin = TransformOrigin(0.88f, 0.95f),
-                        animationSpec = androidx.compose.animation.core.spring(
-                            dampingRatio = 0.85f,
-                            stiffness = androidx.compose.animation.core.Spring.StiffnessMedium
-                        )
-                    ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(150)),
+                        targetScale = 0.97f,
+                        animationSpec = androidx.compose.animation.core.tween(85)
+                    ) + fadeOut(animationSpec = androidx.compose.animation.core.tween(85)),
                     modifier = Modifier.padding(bottom = 6.dp)
                 ) {
                     ReaderThemeMenu(

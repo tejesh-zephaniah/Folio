@@ -54,12 +54,12 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.coroutineScope
-import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
+import io.github.tejesh_zephaniah.folio.core.FolioWebView
 import org.readium.adapter.pdfium.navigator.PdfiumEngineProvider
 import org.readium.r2.navigator.DecorableNavigator
 import org.readium.r2.navigator.Decoration
@@ -241,6 +241,7 @@ fun ReadiumReaderContainer(
                     ?: return@withContext null
                 publication = opened
                 val active = ReadiumController(opened, fileType.equals("pdf", ignoreCase = true))
+                // Preload on IO because Readium also reads these synchronously when a page settles.
                 active.positions = try {
                     opened.positions()
                 } catch (e: CancellationException) {
@@ -253,6 +254,10 @@ fun ReadiumReaderContainer(
             }
             if (loaded == null) {
                 openError = "The publication could not be parsed."
+                return@LaunchedEffect
+            }
+            if (!loaded.isPdf && !FolioWebView.awaitReady(context)) {
+                openError = "The Android WebView needed to open this book is unavailable."
                 return@LaunchedEffect
             }
 
@@ -339,12 +344,11 @@ fun ReadiumReaderContainer(
                                 loaded.paginationFailed.value = false
                                 val parent = host.parent as? FrameLayout ?: return@collectLatest
                                 if (size.width <= 0 || size.height <= 0) return@collectLatest
-                                delay(250)
                                 val layout = EpubLayoutKey(bookFile.absolutePath, size.width, size.height, scale)
                                 val pages = try {
                                     measureEpubPages(
                                         activity, parent, loaded.publication, epubPreferences(latestTheme, scale), layout
-                                    )
+                                    ) { loaded.epubPageCurl?.awaitSettled() }
                                 } catch (e: CancellationException) {
                                     throw e
                                 } catch (e: Exception) {
@@ -396,6 +400,11 @@ fun ReadiumReaderContainer(
                         window = activity.window,
                         scope = scope,
                         navigator = { controller?.epubFragment },
+                        isEdgeResource = { locator, forward ->
+                            val spine = controller?.takeIf { it.reflowsText }?.publication?.readingOrder
+                            val edge = if (forward) spine?.lastOrNull() else spine?.firstOrNull()
+                            edge?.url()?.removeFragment() == locator.href.removeFragment()
+                        },
                         paperColor = { latestTheme.backgroundArgb.toInt() },
                         overlaps = { controller?.overlappingHighlights() }
                     ) { mode ->
@@ -482,11 +491,12 @@ private class ReaderSelectionHost(
     window: Window,
     private val scope: CoroutineScope,
     navigator: () -> EpubNavigatorFragment?,
+    isEdgeResource: (Locator, Boolean) -> Boolean,
     paperColor: () -> Int,
     private val overlaps: suspend () -> Set<String>?,
     private val onHighlight: (ActionMode) -> Unit
 ) : FrameLayout(context) {
-    val pageCurl = EpubPageCurl(this, window, scope, navigator, paperColor)
+    val pageCurl = EpubPageCurl(this, window, scope, navigator, isEdgeResource, paperColor)
     private var selectionMode: ActionMode? = null
 
     override fun dispatchTouchEvent(event: MotionEvent): Boolean =

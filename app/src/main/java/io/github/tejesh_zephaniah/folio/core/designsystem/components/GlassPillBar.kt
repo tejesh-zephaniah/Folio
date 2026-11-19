@@ -58,6 +58,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import io.github.tejesh_zephaniah.folio.core.designsystem.effects.GlassBackdrop
+import io.github.tejesh_zephaniah.folio.core.designsystem.effects.captureGlassSource
+import io.github.tejesh_zephaniah.folio.core.designsystem.effects.rememberGlassSource
 import io.github.tejesh_zephaniah.folio.core.designsystem.effects.GlassSource
 import io.github.tejesh_zephaniah.folio.core.designsystem.effects.rememberGlassRim
 import kotlin.math.abs
@@ -100,6 +102,7 @@ internal fun GlassPillBar(
     val selectTab by rememberUpdatedState(onTabSelected)
     val layoutDirection = LocalLayoutDirection.current
     var barCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
+    val dockSurface = rememberGlassSource()
 
     LaunchedEffect(selectedTab, releaseCount) {
         releaseIndex?.let {
@@ -108,7 +111,7 @@ internal fun GlassPillBar(
         }
         animatedIndex.animateTo(
             selectedTab.ordinal.toFloat(),
-            spring(dampingRatio = 0.88f, stiffness = Spring.StiffnessMedium)
+            tween(235)
         )
     }
 
@@ -203,6 +206,7 @@ internal fun GlassPillBar(
                 .matchParentSize()
                 .shadow(4.dp, CircleShape)
                 .clip(CircleShape)
+                .captureGlassSource(dockSurface)
                 .border(1.dp, rim, CircleShape)
         )
 
@@ -220,7 +224,8 @@ internal fun GlassPillBar(
                 }
         ) {
             GlassBackdrop(
-                source = backdrop,
+                // The lens samples the already frosted dock strip instead of replaying the page.
+                source = dockSurface,
                 targetCoordinates = { barCoordinates },
                 sampleOffset = {
                     with(density) {

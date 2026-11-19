@@ -1,8 +1,6 @@
 package io.github.tejesh_zephaniah.folio.core.designsystem.components
 
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.animation.core.Spring
-import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.core.MutableTransitionState
 import androidx.compose.animation.fadeIn
@@ -71,18 +69,14 @@ fun GlassExpandedMenu(
                 visibleState = visibility,
                 enter = scaleIn(
                     transformOrigin = transformOrigin,
-                    animationSpec = spring(
-                        dampingRatio = 0.76f,
-                        stiffness = Spring.StiffnessMedium
-                    )
-                ) + fadeIn(animationSpec = tween(200)),
+                    initialScale = 0.96f,
+                    animationSpec = tween(110)
+                ) + fadeIn(animationSpec = tween(95)),
                 exit = scaleOut(
                     transformOrigin = transformOrigin,
-                    animationSpec = spring(
-                        dampingRatio = 0.85f,
-                        stiffness = Spring.StiffnessMedium
-                    )
-                ) + fadeOut(animationSpec = tween(150))
+                    targetScale = 0.97f,
+                    animationSpec = tween(85)
+                ) + fadeOut(animationSpec = tween(85))
             ) {
                 GlassSurface(
                     modifier = modifier

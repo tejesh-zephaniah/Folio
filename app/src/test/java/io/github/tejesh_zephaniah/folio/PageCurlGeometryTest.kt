@@ -1,5 +1,6 @@
 package io.github.tejesh_zephaniah.folio
 
+import io.github.tejesh_zephaniah.folio.reader.components.ForwardPageFold
 import io.github.tejesh_zephaniah.folio.reader.components.PageCurlGeometry
 import io.github.tejesh_zephaniah.folio.reader.components.PageTurnCorner
 import io.github.tejesh_zephaniah.folio.reader.components.PageTurnProgress
@@ -11,6 +12,52 @@ import kotlin.math.abs
 import kotlin.math.hypot
 
 class PageCurlGeometryTest {
+    @Test
+    fun forwardFoldSharesTheSilhouetteAndKeepsTheSpineAttached() {
+        val fold = ForwardPageFold()
+        for (grab in listOf(0.08f, 0.5f, 0.92f)) {
+            for (dy in listOf(-200f, 0f, 200f)) {
+                fold.shape(400f, 800f, 230f, 230f, dy, 1f, grab, 400, 800)
+                for (vertex in fold.normals.indices) {
+                    val index = vertex * 2
+                    assertTrue(fold.positions[index].isFinite())
+                    if (fold.texture[index] < 0.001f) {
+                        assertEquals(0f, fold.positions[index], 0.001f)
+                        assertEquals(fold.texture[index + 1], fold.positions[index + 1], 0.001f)
+                    }
+                }
+            }
+        }
+        fold.shape(400f, 800f, 800f, 230f, 200f, 1f, 0.08f, 400, 800)
+        assertTrue(fold.normals.indices.all { fold.positions[it * 2] <= 0.001f })
+    }
+
+    @Test
+    fun sameEdgeGrabCanSteerTheFoldUpAndDown() {
+        val fold = ForwardPageFold()
+        val bottom = fold.shadow.size - 6
+        fold.shape(400f, 800f, 180f, 180f, 120f, 1f, 0.5f, 400, 800)
+        assertTrue(fold.shadow[0] < fold.shadow[bottom])
+        fold.shape(400f, 800f, 180f, 180f, -120f, 1f, 0.5f, 400, 800)
+        assertTrue(fold.shadow[0] > fold.shadow[bottom])
+    }
+
+    @Test
+    fun horizontalInteriorGrabBowsTheFoldAndJoinsBothFaces() {
+        val fold = ForwardPageFold()
+        fold.shape(400f, 800f, 155f, 155f, 0f, 0.45f, 0.5f, 400, 800)
+        val bottom = fold.shadow.size - 6
+        val bow = fold.shadow[0] - fold.shadow[bottom / 2]
+        assertTrue(bow in 15f..30f)
+        assertEquals(fold.shadow[0], fold.shadow[bottom], 0.001f)
+        val boundary = fold.frontIndices.toSet().intersect(fold.backIndices.toSet())
+        assertTrue(boundary.size > 20)
+        assertTrue(boundary.all { abs(fold.normals[it.toInt()]) < 0.0001f })
+        val interiorCrest = fold.shadow[bottom / 2]
+        fold.shape(400f, 800f, 155f, 155f, 0f, 1f, 0.5f, 400, 800)
+        assertTrue(fold.shadow[bottom / 2] - interiorCrest > 30f)
+    }
+
     @Test
     fun boundSheetKeepsItsSpineAndEdgesAlignedDuringTheDrag() {
         val width = 400f
@@ -51,6 +98,17 @@ class PageCurlGeometryTest {
         assertTrue(top.shadowEdge < top.bottomShadowEdge)
         assertEquals(top.shadowEdge, bottom.bottomShadowEdge, 0.001f)
         assertEquals(top.bottomShadowEdge, bottom.shadowEdge, 0.001f)
+        val topLifted = PageCurlGeometry.boundPage(width, height, 180f, true, columns, PageTurnCorner.TOP_RIGHT, 70f)
+        val bottomLifted = PageCurlGeometry.boundPage(width, height, 180f, true, columns, PageTurnCorner.BOTTOM_RIGHT, 70f)
+        val topRightY = columns * PageCurlGeometry.FLOATS_PER_VERTEX + 1
+        val bottomRightY = bottomLifted.mesh.vertices.size - PageCurlGeometry.FLOATS_PER_VERTEX + 1
+        assertTrue(topLifted.mesh.vertices[topRightY] < top.mesh.vertices[topRightY])
+        assertTrue(bottomLifted.mesh.vertices[bottomRightY] > bottom.mesh.vertices[bottomRightY])
+        assertEquals(topLifted.mesh.vertices[topRightY], -bottomLifted.mesh.vertices[bottomRightY], 0.001f)
+        assertEquals(top.mesh.vertices[bottomRightY], topLifted.mesh.vertices[bottomRightY], 0f)
+        assertEquals(bottom.mesh.vertices[topRightY], bottomLifted.mesh.vertices[topRightY], 0f)
+        val returning = PageCurlGeometry.boundPage(width, height, 1f, true, columns, PageTurnCorner.TOP_RIGHT, 70f)
+        assertEquals(1f, returning.mesh.vertices[topRightY], 0.003f)
         for (corner in listOf(PageTurnCorner.TOP_RIGHT, PageTurnCorner.BOTTOM_RIGHT)) {
             val mesh = PageCurlGeometry.boundPage(width, height, 2 * width, true, columns, corner).mesh
             assertTrue(mesh.vertices.all(Float::isFinite))

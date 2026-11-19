@@ -53,6 +53,7 @@ dependencies {
     implementation("org.readium.kotlin-toolkit:readium-adapter-pdfium:$readiumVersion")
 
     implementation("androidx.fragment:fragment-ktx:1.8.5")
+    implementation("androidx.webkit:webkit:1.17.0")
 
     implementation(platform(libs.androidx.compose.bom))
     implementation(libs.androidx.activity.compose)

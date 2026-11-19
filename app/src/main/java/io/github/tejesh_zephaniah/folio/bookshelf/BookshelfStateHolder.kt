@@ -5,7 +5,6 @@ import android.util.Log
 import android.widget.Toast
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -34,6 +33,8 @@ class BookshelfState(
         private set
 
     var bookToRename by mutableStateOf<Book?>(null)
+    var latestExploreImport by mutableStateOf<String?>(null)
+        private set
 
     fun onSearchQueryChanged(newQuery: String) {
         uiState = uiState.copy(searchQuery = newQuery)
@@ -96,6 +97,20 @@ class BookshelfState(
         uiState = uiState.copy(books = books)
     }
 
+    internal fun showExploreImport(book: Book) {
+        uiState = uiState.copy(
+            books = if (uiState.books.any { it.id == book.id }) uiState.books else listOf(book) + uiState.books,
+            searchQuery = "",
+            isSearchActive = false,
+            selectedFilter = BookshelfFilter.ALL,
+            sortOrder = SortOrder.RECENTLY_ADDED
+        )
+        latestExploreImport = book.id
+    }
+
+    internal fun acknowledgeExploreImport(id: String) {
+        if (latestExploreImport == id) latestExploreImport = null
+    }
 }
 
 @Composable
@@ -104,12 +119,11 @@ fun rememberBookshelfState(
 ): BookshelfState {
     val repository = remember(context) { BookRepository.getInstance(context) }
     val scope = rememberCoroutineScope()
-    val repoBooks by repository.books.collectAsState()
 
     val state = remember(context) {
         val recentlyRead = PreferencesManager.getRecentlyReadBookIds(context)
         BookshelfState(
-            initialBooks = repoBooks,
+            initialBooks = repository.books.value,
             recentlyReadIds = recentlyRead,
             onRenameAction = { book, newTitle ->
                 scope.launch {
@@ -140,9 +154,11 @@ fun rememberBookshelfState(
         repository.refreshBooks()
     }
 
-    LaunchedEffect(repoBooks) {
-        state.setBooks(repoBooks)
-        state.refreshRecentlyRead(PreferencesManager.getRecentlyReadBookIds(context))
+    LaunchedEffect(repository, state) {
+        repository.books.collect { books ->
+            state.setBooks(books)
+            state.refreshRecentlyRead(PreferencesManager.getRecentlyReadBookIds(context))
+        }
     }
 
     return state

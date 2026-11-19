@@ -10,6 +10,8 @@ import android.util.Log
 import io.github.tejesh_zephaniah.folio.data.model.Book
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.NonCancellable
+import kotlinx.coroutines.ensureActive
 import kotlinx.coroutines.withContext
 import org.readium.r2.shared.publication.services.cover
 import org.readium.r2.shared.publication.services.positions
@@ -202,8 +204,12 @@ object BookImporter {
                 lastReadAt = System.currentTimeMillis()
             )
 
-            BookRepository.getInstance(context).insertBook(storedBook)
-            committed = true
+            ensureActive()
+            // Once the library owns the files, cancellation must not remove the staged copy.
+            withContext(NonCancellable) {
+                BookRepository.getInstance(context).insertBook(storedBook)
+                committed = true
+            }
             Result.success(storedBook.toBook())
         } catch (e: CancellationException) {
             throw e

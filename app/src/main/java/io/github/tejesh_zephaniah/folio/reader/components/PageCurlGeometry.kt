@@ -44,6 +44,7 @@ internal data class BoundPageCurl(val mesh: PageCurlMesh, val shadowEdge: Float,
 
 internal object PageCurlGeometry {
     const val FLOATS_PER_VERTEX = 9
+    const val CORNER_ROWS = 16
 
     fun boundPage(
         width: Float,
@@ -51,7 +52,10 @@ internal object PageCurlGeometry {
         distance: Float,
         fromRight: Boolean,
         columns: Int,
-        rightCorner: PageTurnCorner? = null
+        rightCorner: PageTurnCorner? = null,
+        inwardDrag: Float = 0f,
+        reuseMesh: PageCurlMesh? = null,
+        uniformRows: Boolean = false
     ): BoundPageCurl {
         val pull = distance.coerceIn(0f, 2f * width)
         if (pull == 0f) {
@@ -59,49 +63,71 @@ internal object PageCurlGeometry {
         }
 
         val corner = rightCorner.takeIf { fromRight }
-        val rows = if (corner != null) 16 else 1
-        val taper = 0.34f * ((2f * width - pull) / width).coerceIn(0f, 1f)
+        val rows = if (corner != null) CORNER_ROWS else 1
+        val mirrorY = corner == PageTurnCorner.BOTTOM_RIGHT
+        // Start with a diagonal fold through the grabbed corner. As the page rolls over,
+        // straighten the fold so it clears the spine in the same way as an edge turn.
+        val tilt = if (corner == null) 0f else {
+            val straighten = 1f - smoothStep(width * 0.45f, width * 1.30f, pull)
+            (inwardDrag / pull).coerceIn(0.30f, 1.15f) * straighten
+        }
+        val normalX = 1f / sqrt(1f + tilt * tilt)
+        val normalY = -tilt * normalX
         val halfTurn = PI.toFloat()
-        val vertices = FloatArray((columns + 1) * (rows + 1) * FLOATS_PER_VERTEX)
-        var topEdge = 0f
-        var bottomEdge = 0f
+        val normalPull = pull / normalX
+        val radius = minOf(width * 0.09f, normalPull / 4f)
+        val arcLength = halfTurn * radius
+        val crease = width * normalX - (normalPull + arcLength) * 0.5f
+        // Give a small curl more mesh detail near its corner, then spread the rows evenly.
+        val rowBias = if (corner == null || uniformRows) 0f else {
+            1f - smoothStep(width * 0.28f, width, pull)
+        }
+        val mesh = reuseMesh?.takeIf { it.columns == columns && it.rows == rows } ?: PageCurlMesh(
+            FloatArray((columns + 1) * (rows + 1) * FLOATS_PER_VERTEX),
+            createIndices(columns, rows), columns, rows
+        )
+        val vertices = mesh.vertices
+        val depthScale = max(width, height)
+        fun shadowEdge(pageY: Float): Float {
+            val edge = (crease + radius - normalY * pageY) / normalX
+            return if (fromRight) edge else width - edge
+        }
         for (row in 0..rows) {
-            val v = row.toFloat() / rows
-            val awayFromCorner = when (corner) {
-                PageTurnCorner.TOP_RIGHT -> v
-                PageTurnCorner.BOTTOM_RIGHT -> 1f - v
-                else -> 0f
-            }
-            // Vary the pull across the sheet while keeping the same bounded fold at each row.
-            val rowPull = pull * (1f - taper * awayFromCorner)
-            val radius = minOf(width * 0.09f, rowPull / 4f)
-            val arcLength = halfTurn * radius
-            val crease = width - (rowPull + arcLength) * 0.5f
-            val edge = if (fromRight) crease + radius else width - crease - radius
-            if (row == 0) topEdge = edge
-            if (row == rows) bottomEdge = edge
+            val fraction = row.toFloat() / rows
+            val progress = if (mirrorY) 1f - fraction else fraction
+            val v = fraction + (if (mirrorY) 1f else -1f) * rowBias * progress * (1f - progress)
+            val pageY = (if (mirrorY) 1f - v else v) * height
             for (column in 0..columns) {
                 val u = column.toFloat() / columns
                 val pageX = (if (fromRight) u else 1f - u) * width
-                val pastCrease = (pageX - crease).coerceAtLeast(0f)
+                val pastCrease = (pageX * normalX + pageY * normalY - crease).coerceAtLeast(0f)
                 val angle = (pastCrease / radius).coerceAtMost(halfTurn)
-                val projected = pageX - pastCrease + radius * sin(angle) -
-                    (pastCrease - arcLength).coerceAtLeast(0f)
-                val x = if (fromRight) projected else width - projected
+                val displacement = when (angle) {
+                    0f -> 0f
+                    halfTurn -> 2f * pastCrease - arcLength
+                    else -> pastCrease - radius * sin(angle)
+                }
+                val normal = when (angle) {
+                    0f -> 1f
+                    halfTurn -> -1f
+                    else -> cos(angle)
+                }
+                val x = pageX - displacement * normalX
+                val y = pageY - displacement * normalY
                 val index = (row * (columns + 1) + column) * FLOATS_PER_VERTEX
-                vertices[index] = x / width * 2f - 1f
-                vertices[index + 1] = 1f - 2f * v
-                vertices[index + 2] = -radius * (1f - cos(angle)) / max(width, height)
-                vertices[index + 5] = cos(angle)
+                vertices[index] = 2f * (if (fromRight) x else width - x) / width - 1f
+                vertices[index + 1] = 1f - 2f * (if (mirrorY) height - y else y) / height
+                vertices[index + 2] = -radius * (1f - normal) / depthScale
+                vertices[index + 5] = normal
                 vertices[index + 6] = u
                 vertices[index + 7] = v
                 vertices[index + 8] = angle / halfTurn
             }
         }
         return BoundPageCurl(
-            PageCurlMesh(vertices, createIndices(columns, rows), columns, rows),
-            topEdge,
-            bottomEdge
+            mesh,
+            shadowEdge(if (mirrorY) height else 0f),
+            shadowEdge(if (mirrorY) 0f else height)
         )
     }
 

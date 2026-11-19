@@ -120,12 +120,11 @@ internal fun GlassBackdrop(
     val fallback = if (isLens || cornerRadius != Dp.Unspecified) colors.surfaceVariant else colors.surface
 
     Box(modifier.drawWithCache {
-        // Frost softens the details already. Render only the sampled region at half resolution.
-        val downsample = 0.5f
+        val downsample = if (Build.VERSION.SDK_INT >= 33) 0.4f else 0.5f
         val cropSize = IntSize(ceil(size.width * downsample).toInt(), ceil(size.height * downsample).toInt())
         if (source != null && Build.VERSION.SDK_INT >= 31 && cropSize.width > 0 && cropSize.height > 0) {
             val sampleDensity = density * downsample
-            val blurRadius = (if (isLens) 9f else 12f) * sampleDensity
+            val blurRadius = (if (isLens) 4f else 12f) * sampleDensity
             val radius = if (cornerRadius == Dp.Unspecified) cropSize.height * 0.5f
                 else cornerRadius.toPx() * downsample
             val key = GlassEffectKey(cropSize, sampleDensity, blurRadius, dark, isLens, radius)
@@ -191,6 +190,11 @@ private fun glassOptics(
         uniform float dark;
         uniform float lens;
         uniform float radius;
+        uniform float frostRadius;
+
+        half4 sampleAt(float2 pixel) {
+            return backdrop.eval(clamp(pixel, float2(0.5), bounds - 0.5));
+        }
 
         half4 main(float2 pixel) {
             float2 fromCenter = pixel - bounds * 0.5;
@@ -204,7 +208,15 @@ private fun glassOptics(
             float focus = 1.0 - smoothstep(0.54, 1.08, length(scaledLens));
             opticalOffset -= fromCenter * focus * lens * 0.28;
 
-            half4 frosted = backdrop.eval(clamp(pixel + opticalOffset, float2(0.5), bounds - 0.5));
+            // Filter the refracted sample in one pass over the reduced-resolution crop.
+            float2 point = pixel + opticalOffset;
+            float x = frostRadius * 0.65;
+            float y = x * 0.75;
+            half4 frosted = sampleAt(point) * 0.25;
+            frosted += (sampleAt(point + float2(x, 0.0)) + sampleAt(point - float2(x, 0.0))
+                      + sampleAt(point + float2(0.0, y)) + sampleAt(point - float2(0.0, y))) * 0.125;
+            frosted += (sampleAt(point + float2(x, y)) + sampleAt(point + float2(-x, y))
+                      + sampleAt(point + float2(x, -y)) + sampleAt(point - float2(x, y))) * 0.0625;
             float brightness = dot(float3(frosted.rgb), float3(0.2126, 0.7152, 0.0722));
 
             // Compress only the brightness range that competes with the theme's label ink.
@@ -222,6 +234,7 @@ private fun glassOptics(
         setFloatUniform("dark", if (dark) 1f else 0f)
         setFloatUniform("lens", if (isLens) 1f else 0f)
         setFloatUniform("radius", radius)
+        setFloatUniform("frostRadius", blurRadius)
     }
-    return RenderEffect.createChainEffect(RenderEffect.createRuntimeShaderEffect(shader, "backdrop"), frost(blurRadius))
+    return RenderEffect.createRuntimeShaderEffect(shader, "backdrop")
 }

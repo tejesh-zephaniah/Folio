@@ -1,20 +1,21 @@
 package io.github.tejesh_zephaniah.folio
 
 import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.ExitTransition
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.fadeIn
-import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
-import androidx.compose.animation.scaleOut
 import androidx.compose.animation.togetherWith
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBarsPadding
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
@@ -23,9 +24,11 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.produceState
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clipToBounds
@@ -41,6 +44,7 @@ import androidx.lifecycle.LifecycleOwner
 import io.github.tejesh_zephaniah.folio.bookshelf.BookActions
 import io.github.tejesh_zephaniah.folio.bookshelf.BookshelfScreen
 import io.github.tejesh_zephaniah.folio.bookshelf.rememberBookshelfState
+import io.github.tejesh_zephaniah.folio.core.FolioWebView
 import io.github.tejesh_zephaniah.folio.core.designsystem.components.FolioTab
 import io.github.tejesh_zephaniah.folio.core.designsystem.components.GlassPillBar
 import io.github.tejesh_zephaniah.folio.core.designsystem.effects.LocalSearchGlassSource
@@ -59,6 +63,7 @@ import io.github.tejesh_zephaniah.folio.home.HomeScreen
 import io.github.tejesh_zephaniah.folio.reader.ReaderScreen
 import io.github.tejesh_zephaniah.folio.search.SearchScreen
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 sealed interface FolioScreen {
     data class Browsing(val tab: FolioTab = FolioTab.Library) : FolioScreen
@@ -77,6 +82,10 @@ fun FolioApp(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val exploreWebReady by produceState<Boolean?>(null, context) {
+        withFrameNanos { }
+        value = FolioWebView.awaitReady(context)
+    }
 
     // App Appearance Mode State (System / Light / Dark)
     var appThemeMode by remember {
@@ -90,8 +99,10 @@ fun FolioApp(
     var currentScreen by remember { mutableStateOf<FolioScreen>(FolioScreen.Browsing(FolioTab.Library)) }
 
     val bookshelfState = rememberBookshelfState(context)
-    val exploreScope = rememberCoroutineScope()
-    val exploreSession = remember(context, exploreScope) { ExploreSession(context, exploreScope) }
+    val appScope = rememberCoroutineScope()
+    val exploreSession = remember(context, appScope, bookshelfState) {
+        ExploreSession(context, appScope, bookshelfState::showExploreImport)
+    }
     val exploreNotice = exploreSession.notice
     LaunchedEffect(exploreNotice) {
         val notice = exploreNotice ?: return@LaunchedEffect
@@ -117,6 +128,19 @@ fun FolioApp(
         currentScreen = FolioScreen.Reader(latestBook)
     }
 
+    fun importBooks(uris: List<android.net.Uri>) {
+        appScope.launch {
+            var firstImported: Book? = null
+            for (uri in uris) {
+                val book = BookImporter.importBook(context, uri).getOrNull()
+                if (firstImported == null) firstImported = book
+            }
+            if (currentScreen is FolioScreen.Browsing && currentTab == FolioTab.Library) {
+                firstImported?.let(::openBook)
+            }
+        }
+    }
+
     // Handle intent-based incoming books (Open With)
     LaunchedEffect(incomingUri) {
         if (incomingUri != null) {
@@ -130,34 +154,16 @@ fun FolioApp(
 
     FolioTheme(appThemeMode = appThemeMode) {
         Box(modifier = modifier.fillMaxSize()) {
-            // Main Content Screen Transition (Book-Opening Animation)
             AnimatedContent(
                 targetState = currentScreen,
                 transitionSpec = {
-                    if (targetState is FolioScreen.Reader) {
-                        // Transition INTO book
-                        (scaleIn(
-                            initialScale = 0.90f,
-                            animationSpec = tween(380, easing = FastOutSlowInEasing)
-                        ) + fadeIn(animationSpec = tween(350))) togetherWith
-                        (scaleOut(
-                            targetScale = 1.05f,
-                            animationSpec = tween(350, easing = FastOutSlowInEasing)
-                        ) + fadeOut(animationSpec = tween(300)))
-                    } else {
-                        // Transition BACK to shelf
-                        (scaleIn(
-                            initialScale = 1.05f,
-                            animationSpec = tween(350, easing = FastOutSlowInEasing)
-                        ) + fadeIn(animationSpec = tween(300))) togetherWith
-                        (scaleOut(
-                            targetScale = 0.90f,
-                            animationSpec = tween(350, easing = FastOutSlowInEasing)
-                        ) + fadeOut(animationSpec = tween(350)))
-                    }
+                    scaleIn(
+                        initialScale = if (targetState is FolioScreen.Reader) 0.975f else 1.017f,
+                        animationSpec = tween(215, easing = FastOutSlowInEasing)
+                    ) togetherWith ExitTransition.None
                 },
-                label = "ScreenTransition",
-                modifier = Modifier.fillMaxSize()
+                modifier = Modifier.fillMaxSize(),
+                label = "Book transition"
             ) { screen ->
                 when (screen) {
                     is FolioScreen.Browsing -> {
@@ -177,7 +183,7 @@ fun FolioApp(
                                         .browsingBackdrop(appThemeMode, MaterialTheme.colorScheme.background)
                                 )
                                 CompositionLocalProvider(LocalSearchGlassSource provides themeBackdrop) {
-                                    SlidingTab(currentTab) {
+                                    TabGlide(currentTab) {
                                         when (currentTab) {
                                             FolioTab.Home -> {
                                                 val continueReadingId = PreferencesManager.getLastOpenedBookId(context)
@@ -203,7 +209,8 @@ fun FolioApp(
                                                         appThemeMode = newMode
                                                         PreferencesManager.setAppThemeMode(context, newMode)
                                                     },
-                                                    onBookOpen = { openBook(it) }
+                                                    onBookOpen = { openBook(it) },
+                                                    onImportBooks = ::importBooks
                                                 )
                                             }
 
@@ -216,11 +223,16 @@ fun FolioApp(
 
                                             FolioTab.Explore -> {
                                                 val bottom = with(LocalDensity.current) { navigationHeight.toDp() }
-                                                ExploreScreen(
-                                                    session = exploreSession,
-                                                    onLeave = { currentTab = FolioTab.Library },
-                                                    modifier = Modifier.statusBarsPadding().padding(bottom = bottom)
-                                                )
+                                                val safeTop = Modifier.statusBarsPadding()
+                                                when (exploreWebReady) {
+                                                    true -> ExploreScreen(
+                                                        session = exploreSession,
+                                                        onLeave = { currentTab = FolioTab.Library },
+                                                        modifier = safeTop.padding(bottom = bottom)
+                                                    )
+                                                    false -> Text("Explore is unavailable.", safeTop.padding(20.dp))
+                                                    null -> LinearProgressIndicator(safeTop.fillMaxWidth())
+                                                }
                                             }
                                         }
                                     }
@@ -245,7 +257,7 @@ fun FolioApp(
                         }
                     }
 
-                    is FolioScreen.Reader -> {
+                    is FolioScreen.Reader -> key(screen.book.id) {
                         ReaderScreen(
                             book = screen.book,
                             onNavigateBack = {
@@ -268,21 +280,22 @@ fun FolioApp(
 }
 
 @Composable
-private fun SlidingTab(tab: FolioTab, content: @Composable () -> Unit) {
-    var previousTab by remember { mutableStateOf(tab) }
-    val slide = remember(tab) { Animatable(tab.ordinal.compareTo(previousTab.ordinal).toFloat()) }
-    val layoutSign = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
-    LaunchedEffect(slide) {
-        previousTab = tab
-        if (slide.value != 0f) slide.animateTo(0f, tween(165, easing = FastOutSlowInEasing))
+private fun TabGlide(tab: FolioTab, content: @Composable () -> Unit) {
+    var displayedTab by remember { mutableStateOf(tab) }
+    val offset = remember(tab) { Animatable(tab.ordinal.compareTo(displayedTab.ordinal).toFloat()) }
+    val direction = if (LocalLayoutDirection.current == LayoutDirection.Ltr) 1 else -1
+    LaunchedEffect(offset) {
+        displayedTab = tab
+        if (offset.value != 0f) {
+            // Give the incoming screen a frame to mount, then move only its drawing layer.
+            withFrameNanos { }
+            offset.animateTo(0f, tween(240, easing = FastOutSlowInEasing))
+        }
     }
-    // Move a single display layer. A full-screen crossfade needs two rendered tabs at once.
     Box(Modifier.fillMaxSize().clipToBounds()) {
-        Box(
-            Modifier.fillMaxSize().graphicsLayer {
-                translationX = 22.dp.toPx() * layoutSign * slide.value
-            }
-        ) {
+        Box(Modifier.fillMaxSize().graphicsLayer {
+            translationX = 22.dp.toPx() * direction * offset.value
+        }) {
             key(tab) { content() }
         }
     }

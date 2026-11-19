@@ -89,7 +89,8 @@ data class StoredBook(
             coverStyle = style,
             chapters = listOf(BookChapter(1, title, emptyList())),
             coverPath = coverPath,
-            isFinished = isFinished
+            isFinished = isFinished,
+            addedAt = addedAt
         )
     }
 }

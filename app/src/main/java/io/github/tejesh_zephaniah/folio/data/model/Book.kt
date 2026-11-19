@@ -21,7 +21,8 @@ data class Book(
     val coverStyle: CoverStyle,
     val chapters: List<BookChapter>,
     val coverPath: String? = null,
-    val isFinished: Boolean = false
+    val isFinished: Boolean = false,
+    val addedAt: Long = 0
 ) {
     val progressPercentage: Int
         get() = pagePercentage(currentPage, totalPages)

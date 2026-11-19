@@ -26,7 +26,7 @@ data class BookshelfUiState(
     val isSearchActive: Boolean = false,
     val selectedFilter: BookshelfFilter = BookshelfFilter.ALL,
     val viewMode: BookshelfViewMode = BookshelfViewMode.GRID_2_COL,
-    val sortOrder: SortOrder = SortOrder.RECENTLY_READ,
+    val sortOrder: SortOrder = SortOrder.RECENTLY_ADDED,
     val selectedBookForDetails: Book? = null,
     val recentlyReadIds: List<String> = emptyList()
 ) {
@@ -61,7 +61,7 @@ data class BookshelfUiState(
                         }.thenByDescending { it.currentPage }
                     )
                 }
-                SortOrder.RECENTLY_ADDED -> result
+                SortOrder.RECENTLY_ADDED -> result.sortedByDescending { it.addedAt }
                 SortOrder.TITLE -> result.sortedBy { it.title.lowercase() }
                 SortOrder.AUTHOR -> result.sortedBy { it.author.lowercase() }
             }
