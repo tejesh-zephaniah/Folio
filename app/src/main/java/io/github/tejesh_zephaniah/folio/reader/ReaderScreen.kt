@@ -10,6 +10,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.layout.Arrangement
@@ -48,6 +50,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.TransformOrigin
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalAccessibilityManager
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.layout.onSizeChanged
@@ -78,10 +83,13 @@ import io.github.tejesh_zephaniah.folio.reader.components.ReaderTocSheet
 import io.github.tejesh_zephaniah.folio.reader.components.ReaderTopBar
 import io.github.tejesh_zephaniah.folio.reader.components.ReadiumController
 import io.github.tejesh_zephaniah.folio.reader.components.ReadiumReaderContainer
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import org.readium.r2.navigator.Decoration
 import org.readium.r2.shared.publication.Locator
 import java.io.File
+
+private const val READER_CONTROLS_TIMEOUT_MILLIS = 4_000L
 
 data class HighlightColorOption(
     val name: String,
@@ -141,7 +149,7 @@ fun ReaderScreen(
     var textStep by remember { mutableIntStateOf(PreferencesManager.getReaderTextStep(context)) }
 
     // Overlays & Sheets visibility
-    var areControlsVisible by remember { mutableStateOf(true) }
+    var areControlsVisible by remember(book.id) { mutableStateOf(true) }
     var isThemeMenuVisible by remember { mutableStateOf(false) }
     var isBookmarksSheetVisible by remember { mutableStateOf(false) }
     var isSearchSheetVisible by remember { mutableStateOf(false) }
@@ -154,6 +162,40 @@ fun ReaderScreen(
     var pendingHighlightLocator by remember { mutableStateOf<Locator?>(null) }
     var isHighlightPickerVisible by remember { mutableStateOf(false) }
     var highlightToRemove by remember(book.id) { mutableStateOf<String?>(null) }
+
+    var activeControlTouches by remember(book.id) { mutableIntStateOf(0) }
+    var completedControlTouches by remember(book.id) { mutableIntStateOf(0) }
+    val hasOpenReaderOverlay = isThemeMenuVisible || isBookmarksSheetVisible ||
+        isSearchSheetVisible || isTocSheetVisible || isHighlightPickerVisible || highlightToRemove != null
+    val shouldHideControls = readiumController != null && areControlsVisible &&
+        !hasOpenReaderOverlay && activeControlTouches == 0
+    val controlsTimeout = LocalAccessibilityManager.current?.calculateRecommendedTimeoutMillis(
+        READER_CONTROLS_TIMEOUT_MILLIS,
+        containsIcons = true,
+        containsText = true,
+        containsControls = true
+    ) ?: READER_CONTROLS_TIMEOUT_MILLIS
+    LaunchedEffect(book.id, shouldHideControls, completedControlTouches, controlsTimeout) {
+        if (!shouldHideControls) return@LaunchedEffect
+        delay(controlsTimeout)
+        areControlsVisible = false
+    }
+
+    // Observe the gesture without consuming it so controls such as the slider can keep handling it.
+    val keepControlsWhileTouched = Modifier.pointerInput(book.id) {
+        awaitEachGesture {
+            awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+            activeControlTouches++
+            try {
+                do {
+                    val event = awaitPointerEvent(PointerEventPass.Initial)
+                } while (event.changes.any { it.pressed })
+            } finally {
+                activeControlTouches--
+                completedControlTouches++
+            }
+        }
+    }
 
     fun removeHighlights(ids: Set<String>) {
         highlightToRemove = null
@@ -310,6 +352,7 @@ fun ReaderScreen(
                 modifier = Modifier
                     .align(Alignment.TopCenter)
                     .onSizeChanged { if (it.height > 0) headerHeight = it.height }
+                    .then(keepControlsWhileTouched)
             )
 
             Column(
@@ -433,6 +476,7 @@ fun ReaderScreen(
                 onPageSelected = { readiumController?.goToPage(it) },
                 modifier = Modifier.align(Alignment.BottomCenter)
                     .onSizeChanged { if (it.height > 0) footerHeight = it.height }
+                    .then(keepControlsWhileTouched)
             )
 
             highlightToRemove?.let { id ->
