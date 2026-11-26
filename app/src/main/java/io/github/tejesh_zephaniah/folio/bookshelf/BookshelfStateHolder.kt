@@ -20,14 +20,18 @@ import kotlinx.coroutines.CancellationException
 class BookshelfState(
     initialBooks: List<Book> = emptyList(),
     recentlyReadIds: List<String> = emptyList(),
+    initialNewBookIds: Set<String> = emptySet(),
     private val onRenameAction: (Book, String) -> Unit = { _, _ -> },
     private val onToggleReadAction: (Book) -> Unit = {},
-    private val onRemoveAction: (Book) -> Unit = {}
+    private val onRemoveAction: (Book) -> Unit = {},
+    private val onMarkBookNewAction: (String) -> Unit = {},
+    private val onMarkBookOpenedAction: (String) -> Unit = {}
 ) {
     var uiState by mutableStateOf(
         BookshelfUiState(
             books = initialBooks,
-            recentlyReadIds = recentlyReadIds
+            recentlyReadIds = recentlyReadIds,
+            newBookIds = initialNewBookIds
         )
     )
         private set
@@ -98,14 +102,87 @@ class BookshelfState(
     }
 
     internal fun showExploreImport(book: Book) {
+        if (uiState.activeDownloads.any { it.completedBook?.id == book.id }) return
+        onMarkBookNewAction(book.id)
         uiState = uiState.copy(
             books = if (uiState.books.any { it.id == book.id }) uiState.books else listOf(book) + uiState.books,
             searchQuery = "",
             isSearchActive = false,
             selectedFilter = BookshelfFilter.ALL,
-            sortOrder = SortOrder.RECENTLY_ADDED
+            sortOrder = SortOrder.RECENTLY_ADDED,
+            newBookIds = uiState.newBookIds + book.id
         )
         latestExploreImport = book.id
+    }
+
+    internal fun registerExploreDownload(id: String, title: String) {
+        val cleanTitle = title.substringBeforeLast('.').ifBlank { "Downloading..." }
+        val entry = ActiveExploreDownload(id = id, title = cleanTitle, progress = 0f, isVisibleInLibrary = false)
+        uiState = uiState.copy(
+            activeDownloads = listOf(entry) + uiState.activeDownloads.filterNot { it.id == id }
+        )
+    }
+
+    internal fun revealExploreDownloadInLibrary(id: String) {
+        uiState = uiState.copy(
+            activeDownloads = uiState.activeDownloads.map {
+                if (it.id == id) it.copy(isVisibleInLibrary = true) else it
+            },
+            searchQuery = "",
+            isSearchActive = false,
+            selectedFilter = BookshelfFilter.ALL,
+            sortOrder = SortOrder.RECENTLY_ADDED
+        )
+        latestExploreImport = id
+    }
+
+    internal fun updateExploreDownloadProgress(id: String, progress: Float?) {
+        uiState = uiState.copy(
+            activeDownloads = uiState.activeDownloads.map {
+                if (it.id == id && !it.isCompleting) it.copy(progress = progress) else it
+            }
+        )
+    }
+
+    internal fun completeExploreDownload(id: String, book: Book) {
+        onMarkBookNewAction(book.id)
+        val hasActive = uiState.activeDownloads.any { it.id == id }
+        val updatedBooks = if (uiState.books.any { it.id == book.id }) uiState.books else listOf(book) + uiState.books
+        if (hasActive) {
+            uiState = uiState.copy(
+                books = updatedBooks,
+                newBookIds = uiState.newBookIds + book.id,
+                activeDownloads = uiState.activeDownloads.map {
+                    if (it.id == id) it.copy(
+                        title = book.title,
+                        progress = 1f,
+                        isCompleting = true,
+                        completedBook = book
+                    ) else it
+                }
+            )
+        } else {
+            showExploreImport(book)
+        }
+    }
+
+    internal fun finishExploreDownloadAnimation(id: String) {
+        uiState = uiState.copy(
+            activeDownloads = uiState.activeDownloads.filterNot { it.id == id }
+        )
+    }
+
+    internal fun failExploreDownload(id: String) {
+        uiState = uiState.copy(
+            activeDownloads = uiState.activeDownloads.filterNot { it.id == id }
+        )
+    }
+
+    internal fun markBookOpened(bookId: String) {
+        if (bookId in uiState.newBookIds) {
+            uiState = uiState.copy(newBookIds = uiState.newBookIds - bookId)
+        }
+        onMarkBookOpenedAction(bookId)
     }
 
     internal fun acknowledgeExploreImport(id: String) {
@@ -122,9 +199,11 @@ fun rememberBookshelfState(
 
     val state = remember(context) {
         val recentlyRead = PreferencesManager.getRecentlyReadBookIds(context)
+        val newBookIds = PreferencesManager.getNewBookIds(context)
         BookshelfState(
             initialBooks = repository.books.value,
             recentlyReadIds = recentlyRead,
+            initialNewBookIds = newBookIds,
             onRenameAction = { book, newTitle ->
                 scope.launch {
                     repository.renameBook(book.id, newTitle)
@@ -146,6 +225,12 @@ fun rememberBookshelfState(
                         Toast.makeText(context, "Could not remove book.", Toast.LENGTH_SHORT).show()
                     }
                 }
+            },
+            onMarkBookNewAction = { bookId ->
+                PreferencesManager.addNewBookId(context, bookId)
+            },
+            onMarkBookOpenedAction = { bookId ->
+                PreferencesManager.clearNewBookId(context, bookId)
             }
         )
     }

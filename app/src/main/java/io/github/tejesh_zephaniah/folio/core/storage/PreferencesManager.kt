@@ -38,6 +38,7 @@ object PreferencesManager {
     private const val KEY_READER_THEME = "reader_theme_mode"
     private const val KEY_RECENTLY_READ_LIST = "recently_read_book_ids"
     private const val KEY_BOOKMARKED_BOOK_IDS = "bookmarked_book_ids"
+    private const val KEY_NEW_BOOK_IDS = "new_book_ids"
     private const val KEY_STAGED_IMPORT_DISABLED = "staged_import_disabled"
     private const val PREFIX_BOOK_PAGE = "book_page_"
     private const val PREFIX_BOOK_PAGE_COUNT = "book_page_count_"
@@ -134,13 +135,32 @@ object PreferencesManager {
         }
     }
 
+    internal fun getNewBookIds(context: Context): Set<String> =
+        getPrefs(context).getStringSet(KEY_NEW_BOOK_IDS, emptySet()).orEmpty().toSet()
+
+    internal fun addNewBookId(context: Context, bookId: String) {
+        val ids = getNewBookIds(context).toMutableSet()
+        if (ids.add(bookId)) {
+            getPrefs(context).edit().putStringSet(KEY_NEW_BOOK_IDS, ids).apply()
+        }
+    }
+
+    internal fun clearNewBookId(context: Context, bookId: String) {
+        val ids = getNewBookIds(context).toMutableSet()
+        if (ids.remove(bookId)) {
+            getPrefs(context).edit().putStringSet(KEY_NEW_BOOK_IDS, ids).apply()
+        }
+    }
+
     internal fun clearBookMetadata(context: Context, bookId: String) {
         val prefs = getPrefs(context)
         val bookmarks = prefs.getStringSet(KEY_BOOKMARKED_BOOK_IDS, emptySet()).orEmpty()
+        val newBooks = prefs.getStringSet(KEY_NEW_BOOK_IDS, emptySet()).orEmpty()
         prefs.edit().apply {
             if (getLastOpenedBookId(context) == bookId) remove(KEY_LAST_OPENED_BOOK_ID)
             putString(KEY_RECENTLY_READ_LIST, getRecentlyReadBookIds(context).filterNot { it == bookId }.joinToString(","))
             putStringSet(KEY_BOOKMARKED_BOOK_IDS, bookmarks - bookId)
+            putStringSet(KEY_NEW_BOOK_IDS, newBooks - bookId)
             remove(PREFIX_BOOK_PAGE + bookId)
             remove(PREFIX_BOOK_PAGE_COUNT + bookId)
         }.apply()

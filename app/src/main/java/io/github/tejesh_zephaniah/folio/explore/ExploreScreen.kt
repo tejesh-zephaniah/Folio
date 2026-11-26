@@ -1,6 +1,7 @@
 package io.github.tejesh_zephaniah.folio.explore
 
 import android.content.Context
+import android.os.SystemClock
 import android.util.Log
 import android.view.ViewGroup
 import android.webkit.CookieManager
@@ -14,6 +15,8 @@ import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -31,9 +34,15 @@ import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.input.pointer.PointerEventPass
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.semantics.LiveRegionMode
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.liveRegion
@@ -46,9 +55,11 @@ import io.github.tejesh_zephaniah.folio.core.designsystem.components.FolioCloseI
 import io.github.tejesh_zephaniah.folio.data.model.Book
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.net.URI
 import java.io.ByteArrayInputStream
+import java.util.UUID
 import java.util.concurrent.Executors
 
 private val cookieWrites = Executors.newSingleThreadExecutor()
@@ -90,11 +101,28 @@ internal class ExploreNotice(val text: String)
 internal class ExploreSession(
     context: Context,
     private val scope: CoroutineScope,
-    private val onBookImported: (Book) -> Unit
+    private val onBookImported: (Book) -> Unit,
+    private val onDownloadStarted: (id: String, title: String) -> Unit = { _, _ -> },
+    private val onDownloadProgress: (id: String, progress: Float?) -> Unit = { _, _ -> },
+    private val onDownloadReadyToJump: (id: String, originInWindow: Offset?) -> Unit = { _, _ -> },
+    private val onDownloadFinished: (id: String, book: Book) -> Unit = { _, _ -> },
+    private val onDownloadFailed: (id: String) -> Unit = {}
 ) {
     private val appContext = context.applicationContext
     private var browser: WebView? = null
     private val downloads = mutableSetOf<URI>()
+    private var lastTouchInWindow: Offset? = null
+    private var lastTouchAtMs: Long = 0L
+    private var viewportCenterInWindow: Offset? = null
+
+    fun recordTouch(offsetInWindow: Offset) {
+        lastTouchInWindow = offsetInWindow
+        lastTouchAtMs = SystemClock.uptimeMillis()
+    }
+
+    fun recordViewportCenter(centerInWindow: Offset) {
+        viewportCenterInWindow = centerInWindow
+    }
 
     var showHint by mutableStateOf(true)
     var notice by mutableStateOf<ExploreNotice?>(null)
@@ -274,17 +302,44 @@ internal class ExploreSession(
         val referer = view.url?.let(::httpsExploreUri)
         val userAgent = agent ?: view.settings.userAgentString
         val name = URLUtil.guessFileName(address, disposition, mimeType)
+        val downloadId = UUID.randomUUID().toString()
+        val tapOffset = lastTouchInWindow ?: viewportCenterInWindow
+        val tapTime = lastTouchAtMs
+        onDownloadStarted(downloadId, name)
+
+        var downloadFailedOrCancelled = false
+        val elapsed = if (tapTime > 0L) SystemClock.uptimeMillis() - tapTime else Long.MAX_VALUE
+        val jumpDelayMs = if (elapsed in 0L..1450L) (1150L - elapsed).coerceAtLeast(0L) else 1050L
+        val jumpJob = scope.launch {
+            delay(jumpDelayMs)
+            if (!downloadFailedOrCancelled) {
+                onDownloadReadyToJump(downloadId, tapOffset ?: viewportCenterInWindow)
+            }
+        }
+
         scope.launch {
             try {
-                val book = downloadExploreBook(appContext, url, userAgent, referer, name)
+                val book = downloadExploreBook(appContext, url, userAgent, referer, name) { progress ->
+                    scope.launch { onDownloadProgress(downloadId, progress) }
+                }
+                onDownloadFinished(downloadId, book)
                 onBookImported(book)
                 notice = ExploreNotice("Added to Library · ${book.title}")
             } catch (e: CancellationException) {
+                downloadFailedOrCancelled = true
+                jumpJob.cancel()
+                onDownloadFailed(downloadId)
                 throw e
             } catch (e: ExploreDownloadException) {
+                downloadFailedOrCancelled = true
+                jumpJob.cancel()
+                onDownloadFailed(downloadId)
                 notice = ExploreNotice(e.message.orEmpty())
             } catch (e: Exception) {
                 // Request URLs and cookie headers can carry site credentials.
+                downloadFailedOrCancelled = true
+                jumpJob.cancel()
+                onDownloadFailed(downloadId)
                 Log.w("FolioExplore", "Book download failed (${e.javaClass.simpleName})")
                 notice = ExploreNotice("Couldn’t add the book. Try again or import it locally.")
             } finally {
@@ -334,7 +389,28 @@ internal fun ExploreScreen(
                 TextButton(onClick = session::returnToSite) { Text("Back to Explore") }
             }
         }
-        Box(Modifier.weight(1f).fillMaxWidth()) {
+        var viewOriginInWindow by remember { mutableStateOf(Offset.Zero) }
+        Box(
+            Modifier
+                .weight(1f)
+                .fillMaxWidth()
+                .onGloballyPositioned { coords ->
+                    val origin = coords.positionInWindow()
+                    viewOriginInWindow = origin
+                    session.recordViewportCenter(
+                        Offset(
+                            origin.x + coords.size.width / 2f,
+                            origin.y + coords.size.height / 2f
+                        )
+                    )
+                }
+                .pointerInput(Unit) {
+                    awaitEachGesture {
+                        val down = awaitFirstDown(requireUnconsumed = false, pass = PointerEventPass.Initial)
+                        session.recordTouch(viewOriginInWindow + down.position)
+                    }
+                }
+        ) {
             if (!session.rendererLost) {
                 AndroidView(
                     factory = session::attach,

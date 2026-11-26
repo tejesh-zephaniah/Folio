@@ -20,6 +20,15 @@ enum class SortOrder(val displayName: String) {
     AUTHOR("Author")
 }
 
+data class ActiveExploreDownload(
+    val id: String,
+    val title: String,
+    val progress: Float? = 0f,
+    val isVisibleInLibrary: Boolean = false,
+    val isCompleting: Boolean = false,
+    val completedBook: Book? = null
+)
+
 data class BookshelfUiState(
     val books: List<Book> = emptyList(),
     val searchQuery: String = "",
@@ -28,7 +37,9 @@ data class BookshelfUiState(
     val viewMode: BookshelfViewMode = BookshelfViewMode.GRID_2_COL,
     val sortOrder: SortOrder = SortOrder.RECENTLY_ADDED,
     val selectedBookForDetails: Book? = null,
-    val recentlyReadIds: List<String> = emptyList()
+    val recentlyReadIds: List<String> = emptyList(),
+    val activeDownloads: List<ActiveExploreDownload> = emptyList(),
+    val newBookIds: Set<String> = emptySet()
 ) {
     val filteredBooks: List<Book>
         get() {

@@ -7,12 +7,17 @@ import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.tween
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.Text
@@ -31,12 +36,20 @@ import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.shadow
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
-import androidx.compose.ui.layout.onSizeChanged
+import androidx.compose.ui.platform.LocalWindowInfo
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.lifecycle.DefaultLifecycleObserver
@@ -45,6 +58,7 @@ import io.github.tejesh_zephaniah.folio.bookshelf.BookActions
 import io.github.tejesh_zephaniah.folio.bookshelf.BookshelfScreen
 import io.github.tejesh_zephaniah.folio.bookshelf.rememberBookshelfState
 import io.github.tejesh_zephaniah.folio.core.FolioWebView
+import io.github.tejesh_zephaniah.folio.core.designsystem.components.FolioBookBadgeIcon
 import io.github.tejesh_zephaniah.folio.core.designsystem.components.FolioTab
 import io.github.tejesh_zephaniah.folio.core.designsystem.components.GlassPillBar
 import io.github.tejesh_zephaniah.folio.core.designsystem.effects.LocalSearchGlassSource
@@ -64,6 +78,14 @@ import io.github.tejesh_zephaniah.folio.reader.ReaderScreen
 import io.github.tejesh_zephaniah.folio.search.SearchScreen
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlin.math.PI
+import kotlin.math.roundToInt
+import kotlin.math.sin
+
+private data class JumpingBookEvent(
+    val id: String,
+    val startInWindow: Offset
+)
 
 sealed interface FolioScreen {
     data class Browsing(val tab: FolioTab = FolioTab.Library) : FolioScreen
@@ -100,8 +122,29 @@ fun FolioApp(
 
     val bookshelfState = rememberBookshelfState(context)
     val appScope = rememberCoroutineScope()
+    val windowSize = LocalWindowInfo.current.containerSize
+    var rootOriginInWindow by remember { mutableStateOf(Offset.Zero) }
+    var libraryIconInWindow by remember { mutableStateOf<Offset?>(null) }
+    var libraryCatchTick by remember { mutableIntStateOf(0) }
+    var activeJumps by remember { mutableStateOf<List<JumpingBookEvent>>(emptyList()) }
+
     val exploreSession = remember(context, appScope, bookshelfState) {
-        ExploreSession(context, appScope, bookshelfState::showExploreImport)
+        ExploreSession(
+            context = context,
+            scope = appScope,
+            onBookImported = bookshelfState::showExploreImport,
+            onDownloadStarted = bookshelfState::registerExploreDownload,
+            onDownloadProgress = bookshelfState::updateExploreDownloadProgress,
+            onDownloadReadyToJump = { id, originInWindow ->
+                val fallbackStart = Offset(
+                    rootOriginInWindow.x + windowSize.width * 0.5f,
+                    rootOriginInWindow.y + windowSize.height * 0.45f
+                )
+                activeJumps = activeJumps + JumpingBookEvent(id, originInWindow ?: fallbackStart)
+            },
+            onDownloadFinished = bookshelfState::completeExploreDownload,
+            onDownloadFailed = bookshelfState::failExploreDownload
+        )
     }
     val exploreNotice = exploreSession.notice
     LaunchedEffect(exploreNotice) {
@@ -123,6 +166,7 @@ fun FolioApp(
 
     fun openBook(book: Book) {
         val latestBook = bookshelfState.uiState.books.firstOrNull { it.id == book.id } ?: book
+        bookshelfState.markBookOpened(latestBook.id)
         PreferencesManager.setLastOpenedBookId(context, latestBook.id)
         bookshelfState.refreshRecentlyRead(PreferencesManager.getRecentlyReadBookIds(context))
         currentScreen = FolioScreen.Reader(latestBook)
@@ -153,7 +197,11 @@ fun FolioApp(
     }
 
     FolioTheme(appThemeMode = appThemeMode) {
-        Box(modifier = modifier.fillMaxSize()) {
+        Box(
+            modifier = modifier
+                .fillMaxSize()
+                .onGloballyPositioned { rootOriginInWindow = it.positionInWindow() }
+        ) {
             AnimatedContent(
                 targetState = currentScreen,
                 transitionSpec = {
@@ -250,7 +298,9 @@ fun FolioApp(
                                 GlassPillBar(
                                     selectedTab = currentTab,
                                     onTabSelected = { currentTab = it },
-                                    backdrop = if (isExploring) themeBackdrop else backdrop
+                                    backdrop = if (isExploring) themeBackdrop else backdrop,
+                                    libraryReceivePulseTick = libraryCatchTick,
+                                    onLibraryIconPositioned = { libraryIconInWindow = it }
                                 )
                             }
                             BookActions(bookshelfState)
@@ -275,7 +325,84 @@ fun FolioApp(
                         .padding(horizontal = 20.dp, vertical = 10.dp)
                 )
             }
+            activeJumps.forEach { jump ->
+                key(jump.id) {
+                    val fallbackTarget = Offset(
+                        rootOriginInWindow.x + windowSize.width * 0.38f,
+                        rootOriginInWindow.y + windowSize.height * 0.90f
+                    )
+                    JumpingBookOverlay(
+                        startOffset = jump.startInWindow - rootOriginInWindow,
+                        targetOffset = (libraryIconInWindow ?: fallbackTarget) - rootOriginInWindow,
+                        onLanded = {
+                            libraryCatchTick++
+                            bookshelfState.revealExploreDownloadInLibrary(jump.id)
+                            activeJumps = activeJumps.filterNot { it.id == jump.id }
+                        }
+                    )
+                }
+            }
         }
+    }
+}
+
+@Composable
+private fun JumpingBookOverlay(
+    startOffset: Offset,
+    targetOffset: Offset,
+    onLanded: () -> Unit
+) {
+    val progress = remember { Animatable(0f) }
+    val density = LocalDensity.current
+    val badgeSize = 34.dp
+    val halfBadgePx = with(density) { (badgeSize / 2).toPx() }
+    val arcLiftPx = with(density) { 108.dp.toPx() }
+
+    LaunchedEffect(Unit) {
+        progress.animateTo(
+            targetValue = 1f,
+            animationSpec = tween(durationMillis = 560, easing = FastOutSlowInEasing)
+        )
+        onLanded()
+    }
+
+    val t = progress.value
+    val x = startOffset.x + (targetOffset.x - startOffset.x) * t
+    val linearY = startOffset.y + (targetOffset.y - startOffset.y) * t
+    val arcY = linearY - sin(t * PI).toFloat() * arcLiftPx
+    val badgeScale = when {
+        t < 0.25f -> 0.72f + (t / 0.25f) * 0.42f
+        else -> 1.14f - ((t - 0.25f) / 0.75f) * 0.56f
+    }
+    val tiltDeg = -12f + 22f * t
+    val badgeAlpha = if (t > 0.9f) ((1f - t) / 0.1f).coerceIn(0f, 1f) else 1f
+    val accent = MaterialTheme.colorScheme.primary
+
+    Box(
+        modifier = Modifier
+            .offset {
+                IntOffset(
+                    (x - halfBadgePx).roundToInt(),
+                    (arcY - halfBadgePx).roundToInt()
+                )
+            }
+            .size(badgeSize)
+            .graphicsLayer {
+                scaleX = badgeScale
+                scaleY = badgeScale
+                rotationZ = tiltDeg
+                alpha = badgeAlpha
+            }
+            .shadow(8.dp, CircleShape)
+            .clip(CircleShape)
+            .background(accent)
+            .border(1.5.dp, Color.White.copy(alpha = 0.85f), CircleShape),
+        contentAlignment = Alignment.Center
+    ) {
+        FolioBookBadgeIcon(
+            tint = Color.White,
+            modifier = Modifier.size(18.dp)
+        )
     }
 }
 

@@ -268,3 +268,47 @@ fun FolioAddIcon(
     }
 }
 
+@Composable
+fun FolioBookBadgeIcon(
+    tint: Color,
+    modifier: Modifier = Modifier
+) {
+    Canvas(modifier = modifier) {
+        val w = size.width
+        val h = size.height
+        val stroke = 1.7.dp.toPx()
+
+        // Book body outline with left spine
+        drawRoundRect(
+            color = tint,
+            topLeft = Offset(w * 0.20f, h * 0.14f),
+            size = Size(w * 0.60f, h * 0.72f),
+            cornerRadius = CornerRadius(2.2.dp.toPx()),
+            style = Stroke(width = stroke, cap = StrokeCap.Round, join = StrokeJoin.Round)
+        )
+        // Spine fold vertical line
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.34f, h * 0.14f),
+            end = Offset(w * 0.34f, h * 0.86f),
+            strokeWidth = stroke * 0.85f
+        )
+        // Two subtle title lines on cover
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.44f, h * 0.36f),
+            end = Offset(w * 0.68f, h * 0.36f),
+            strokeWidth = stroke * 0.85f,
+            cap = StrokeCap.Round
+        )
+        drawLine(
+            color = tint,
+            start = Offset(w * 0.44f, h * 0.50f),
+            end = Offset(w * 0.62f, h * 0.50f),
+            strokeWidth = stroke * 0.85f,
+            cap = StrokeCap.Round
+        )
+    }
+}
+
+

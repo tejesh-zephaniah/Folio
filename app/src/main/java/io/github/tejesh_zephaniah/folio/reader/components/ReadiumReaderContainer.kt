@@ -107,12 +107,10 @@ class ReadiumController(
     private val availableNavigator: OverflowableNavigator?
         get() = navigator.takeUnless { epubPageCurl?.isTurning == true }
 
-    fun pageOf(locator: Locator): Int? = if (reflowsText) {
-        renderedPages.value?.pageOf(locator)
-    } else {
-        bookPageFromLocator(locator.locations.position, locator.locations.totalProgression, totalPages)
+    fun pageOf(locator: Locator): Int? =
+        (if (reflowsText) renderedPages.value?.pageOf(locator) else null)
+            ?: bookPageFromLocator(locator.locations.position, locator.locations.totalProgression, totalPages)
             ?: positions.indexOfFirst { it.href == locator.href }.takeIf { it >= 0 }?.plus(1)
-    }
 
     fun goForward(animated: Boolean = true): Boolean {
         return availableNavigator?.goForward(animated) ?: false
@@ -131,7 +129,7 @@ class ReadiumController(
     }
 
     fun goToPage(page: Int): Boolean {
-        if (reflowsText) return renderedPages.value?.locatorFor(page, publication)?.let { go(it) } ?: false
+        if (reflowsText) renderedPages.value?.let { return it.locatorFor(page, publication)?.let { loc -> go(loc) } ?: false }
         if (positions.isNotEmpty()) {
             val loc = positions.getOrNull((page - 1).coerceIn(0, positions.size - 1))
             if (loc != null) return go(loc)

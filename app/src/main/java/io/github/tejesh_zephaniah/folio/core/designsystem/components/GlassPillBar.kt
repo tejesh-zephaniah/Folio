@@ -46,6 +46,7 @@ import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.LayoutCoordinates
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInWindow
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.LocalWindowInfo
@@ -80,7 +81,9 @@ internal fun GlassPillBar(
     selectedTab: FolioTab,
     onTabSelected: (FolioTab) -> Unit,
     backdrop: GlassSource,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    libraryReceivePulseTick: Int = 0,
+    onLibraryIconPositioned: (Offset) -> Unit = {}
 ) {
     val tabHeight = 48.dp
     val spacing = 4.dp
@@ -99,7 +102,19 @@ internal fun GlassPillBar(
     var releaseCount by remember { mutableIntStateOf(0) }
     val previewIndex by remember { derivedStateOf { dragIndex?.roundToInt() } }
     val animatedIndex = remember { Animatable(selectedTab.ordinal.toFloat()) }
+    val libraryCatchScale = remember { Animatable(1f) }
     val selectTab by rememberUpdatedState(onTabSelected)
+
+    LaunchedEffect(libraryReceivePulseTick) {
+        if (libraryReceivePulseTick > 0) {
+            libraryCatchScale.snapTo(1f)
+            libraryCatchScale.animateTo(1.26f, tween(130))
+            libraryCatchScale.animateTo(
+                1f,
+                spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium)
+            )
+        }
+    }
     val layoutDirection = LocalLayoutDirection.current
     var barCoordinates by remember { mutableStateOf<LayoutCoordinates?>(null) }
     val dockSurface = rememberGlassSource()
@@ -267,13 +282,30 @@ internal fun GlassPillBar(
                             val proximity = (1f - 1.5f * abs(indicatorIndex() - tab.ordinal))
                                 .coerceAtLeast(0f)
                             val expanded = pop.value * proximity
-                            scaleX = 1f + expanded * 0.06f
+                            val catchScale = if (tab == FolioTab.Library) libraryCatchScale.value else 1f
+                            scaleX = (1f + expanded * 0.06f) * catchScale
                             scaleY = scaleX
                         },
                     horizontalAlignment = Alignment.CenterHorizontally,
                     verticalArrangement = Arrangement.Center
                 ) {
-                    Box(Modifier.size(20.dp)) {
+                    Box(
+                        Modifier
+                            .size(20.dp)
+                            .then(
+                                if (tab == FolioTab.Library) {
+                                    Modifier.onGloballyPositioned { coords ->
+                                        val origin = coords.positionInWindow()
+                                        onLibraryIconPositioned(
+                                            Offset(
+                                                origin.x + coords.size.width / 2f,
+                                                origin.y + coords.size.height / 2f
+                                            )
+                                        )
+                                    }
+                                } else Modifier
+                            )
+                    ) {
                         tab.Icon(
                             tint = contrast.copy(alpha = 0.62f),
                             modifier = Modifier.matchParentSize().graphicsLayer {

@@ -41,6 +41,8 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import io.github.tejesh_zephaniah.folio.bookshelf.components.ActiveDownloadGridItem
+import io.github.tejesh_zephaniah.folio.bookshelf.components.ActiveDownloadListItem
 import io.github.tejesh_zephaniah.folio.bookshelf.components.BookGridItem
 import io.github.tejesh_zephaniah.folio.bookshelf.components.BookListItem
 import io.github.tejesh_zephaniah.folio.bookshelf.components.BookOverflowBottomSheet
@@ -63,11 +65,18 @@ fun BookshelfScreen(
 ) {
     val uiState = state.uiState
     val displayedBooks = uiState.filteredBooks
+    val visibleDownloads = if (uiState.selectedFilter == BookshelfFilter.ALL && uiState.searchQuery.isBlank()) {
+        uiState.activeDownloads.filter { it.isVisibleInLibrary }
+    } else {
+        emptyList()
+    }
+    val completedInFlightIds = visibleDownloads.mapNotNull { it.completedBook?.id }.toSet()
+    val regularBooks = displayedBooks.filterNot { it.id in completedInFlightIds }
     val grid = rememberLazyGridState()
     val list = rememberLazyListState()
     val latestImport = state.latestExploreImport
-    LaunchedEffect(latestImport, displayedBooks.firstOrNull()?.id, uiState.viewMode) {
-        if (latestImport != null && displayedBooks.firstOrNull()?.id == latestImport) {
+    LaunchedEffect(latestImport, displayedBooks.firstOrNull()?.id, visibleDownloads.firstOrNull()?.id, uiState.viewMode) {
+        if (latestImport != null && (displayedBooks.firstOrNull()?.id == latestImport || visibleDownloads.firstOrNull()?.id == latestImport)) {
             if (uiState.viewMode == BookshelfViewMode.GRID_2_COL) grid.scrollToItem(0)
             else list.scrollToItem(0)
             state.acknowledgeExploreImport(latestImport)
@@ -119,7 +128,7 @@ fun BookshelfScreen(
             )
 
             // Books Content Grid or List
-            if (displayedBooks.isEmpty()) {
+            if (regularBooks.isEmpty() && visibleDownloads.isEmpty()) {
                 // Thoughtful, Editorial Empty State
                 Box(
                     modifier = Modifier
@@ -188,13 +197,25 @@ fun BookshelfScreen(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             items(
-                                items = displayedBooks,
+                                items = visibleDownloads,
+                                key = { "dl_${it.id}" }
+                            ) { download ->
+                                ActiveDownloadGridItem(
+                                    download = download,
+                                    onRevealComplete = state::finishExploreDownloadAnimation,
+                                    onCompletedBookClick = onBookOpen,
+                                    onCompletedBookOptions = state::onOpenBookDetails
+                                )
+                            }
+                            items(
+                                items = regularBooks,
                                 key = { it.id }
                             ) { book ->
                                 BookGridItem(
                                     book = book,
                                     onBookClick = { onBookOpen(it) },
-                                    onOptionsClick = { state.onOpenBookDetails(it) }
+                                    onOptionsClick = { state.onOpenBookDetails(it) },
+                                    isNew = book.id in uiState.newBookIds
                                 )
                             }
                         }
@@ -213,13 +234,23 @@ fun BookshelfScreen(
                             modifier = Modifier.fillMaxSize()
                         ) {
                             items(
-                                items = displayedBooks,
+                                items = visibleDownloads,
+                                key = { "dl_${it.id}" }
+                            ) { download ->
+                                ActiveDownloadListItem(
+                                    download = download,
+                                    onRevealComplete = state::finishExploreDownloadAnimation
+                                )
+                            }
+                            items(
+                                items = regularBooks,
                                 key = { it.id }
                             ) { book ->
                                 BookListItem(
                                     book = book,
                                     onBookClick = { onBookOpen(it) },
-                                    onOptionsClick = { state.onOpenBookDetails(it) }
+                                    onOptionsClick = { state.onOpenBookDetails(it) },
+                                    isNew = book.id in uiState.newBookIds
                                 )
                             }
                         }

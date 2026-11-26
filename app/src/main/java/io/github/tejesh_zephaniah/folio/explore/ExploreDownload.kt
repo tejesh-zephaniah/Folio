@@ -47,7 +47,8 @@ internal suspend fun downloadExploreBook(
     url: URI,
     userAgent: String,
     referer: URI?,
-    suggestedName: String
+    suggestedName: String,
+    onProgress: (Float?) -> Unit = {}
 ) = withContext(Dispatchers.IO) {
     val folder = Files.createTempDirectory(context.cacheDir.toPath(), "explore-book-").toFile()
     var file = File(folder, "download.part")
@@ -87,13 +88,16 @@ internal suspend fun downloadExploreBook(
                     throw ExploreDownloadException("The site has limited downloads. Check your account or try again later.")
                 }
                 if (status != 200) throw ExploreDownloadException("The site couldn’t download this book. Try again.")
-                if (connection.contentLengthLong > MAX_BOOK_BYTES) {
+                val totalBytes = connection.contentLengthLong
+                if (totalBytes > MAX_BOOK_BYTES) {
                     throw ExploreDownloadException("This download is larger than 200 MB.")
                 }
+                if (totalBytes > 0L) onProgress(0f) else onProgress(null)
                 connection.inputStream.use { input ->
                     file.outputStream().use { output ->
                         val buffer = ByteArray(DEFAULT_BUFFER_SIZE)
                         var received = 0L
+                        var lastReportedPct = -1
                         while (true) {
                             ensureActive()
                             val bytes = input.read(buffer)
@@ -103,9 +107,18 @@ internal suspend fun downloadExploreBook(
                                 throw ExploreDownloadException("This download is larger than 200 MB.")
                             }
                             output.write(buffer, 0, bytes)
+                            if (totalBytes > 0L) {
+                                val fraction = (received.toFloat() / totalBytes).coerceIn(0f, 1f)
+                                val pct = (fraction * 100).toInt()
+                                if (pct != lastReportedPct) {
+                                    lastReportedPct = pct
+                                    onProgress(fraction)
+                                }
+                            }
                         }
                     }
                 }
+                onProgress(1f)
                 val extension = downloadedBookExtension(file)
                     ?: throw ExploreDownloadException("The site didn’t send a book file. Check your sign-in and download limit.")
                 val name = connection.getHeaderField("Content-Disposition")

@@ -131,8 +131,9 @@ fun ReaderScreen(
     val renderedPages = readiumController?.renderedPages?.collectAsState()?.value
     val paginationFailed = readiumController?.paginationFailed?.collectAsState()?.value == true
     val reflowsText = readiumController?.reflowsText == true
+    val hasInstantPositions = readiumController?.positions?.isNotEmpty() == true
     val paginationStatus = when {
-        !reflowsText || renderedPages != null -> null
+        !reflowsText || renderedPages != null || hasInstantPositions -> null
         paginationFailed -> "Page count unavailable"
         else -> "Counting pages…"
     }
